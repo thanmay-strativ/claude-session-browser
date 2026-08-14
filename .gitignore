@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IDE
+.idea/
+*.iml
+.intellijPlatform/
+.kotlin/
+
+# The MCP server's virtualenv is generated, not source: the plugin builds it on
+# install, and its activate scripts hardcode the absolute path of whoever built it.
+mcp-server/.venv/
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store

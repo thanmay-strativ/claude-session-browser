@@ -1,0 +1,22 @@
+[project]
+name = "claude-session-cache"
+version = "0.1.0"
+description = "Local searchable SQLite cache of Claude Code sessions, exposed over MCP"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.2.0",
+]
+
+[project.scripts]
+claude-session-cache = "claude_session_cache.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/claude_session_cache"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

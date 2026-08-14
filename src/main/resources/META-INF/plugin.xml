@@ -1,0 +1,200 @@
+<idea-plugin>
+    <id>com.mahadi.claudesessions</id>
+    <name>Claude Session Browser</name>
+    <vendor>Mahadi</vendor>
+
+    <description><![CDATA[
+        <p>Browse, search and resume every Claude Code session from a tool window on
+        the left. Sessions are grouped by project and show their title, age, model,
+        message count and git branch.</p>
+
+        <ul>
+            <li><b>Read before you resume</b> — open a session's full conversation as a
+                read-only transcript, then hit <b>Continue session</b> to pick it up in a
+                new integrated Terminal tab (<code>claude --resume &lt;id&gt;</code>).
+                The play button at the start of any row resumes it without opening the
+                transcript.</li>
+            <li><b>Search</b> — filter by title, project, git branch or tag instantly (the
+                auto-derived ticket id included), or tick <b>Content</b> to search inside the
+                messages themselves.</li>
+            <li><b>Organise</b> — sessions tag themselves from their branch and title (the
+                ticket id, plus topics like <code>#bugfix</code> or <code>#migration</code>);
+                add your own by hand or ask Claude to suggest some. Rename, pin, export a
+                transcript to Markdown, and delete single sessions or a multi-selection.</li>
+            <li><b>Multiple accounts</b> — define an environment per Claude account and
+                switch between them from the dropdown. Each carries its own session
+                directory and <code>CLAUDE_CONFIG_DIR</code>, so resuming, tagging and MCP
+                all act as that account.</li>
+            <li><b>Stats</b> — a daily activity chart with week-on-week change, per-account
+                usage (sessions, messages, tokens), your heaviest sessions, the files you keep
+                returning to, which tools and MCP servers do the work, breakdowns by project,
+                model, branch and tag, and how much of your history is searchable by Claude.</li>
+            <li><b>MCP</b> — an optional local SQLite cache of every session, exposed to
+                Claude Code so it can search your past work. One tick sets it up, indexes
+                your history and schedules a daily refresh; searches stay scoped to the
+                account you have selected.</li>
+        </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <h4>1.1.19</h4>
+        <ul>
+            <li>Branch always shown on a row</li>
+            <li>Shortens instead of disappearing</li>
+            <li>Detached HEAD no longer hidden</li>
+        </ul>
+        <h4>1.1.18</h4>
+        <ul>
+            <li>Tool use split in stats</li>
+            <li>MCP tools grouped by server</li>
+        </ul>
+        <h4>1.1.17</h4>
+        <ul>
+            <li>Daily activity chart, 14 days</li>
+            <li>Week-on-week change per account</li>
+            <li>Active days, heaviest sessions</li>
+            <li>Files you keep returning to</li>
+            <li>Commits and cache freshness</li>
+            <li>Housekeeping counts</li>
+            <li>Dropped the filler tiles</li>
+            <li>Session cache self-updates</li>
+        </ul>
+        <h4>1.1.16</h4>
+        <ul>
+            <li>Play button moved to the row start</li>
+            <li>Clear of the scrollbar, and it works</li>
+            <li>Bigger, clearly a button</li>
+        </ul>
+        <h4>1.1.15</h4>
+        <ul>
+            <li>Search field says what it searches</li>
+        </ul>
+        <h4>1.1.14</h4>
+        <ul>
+            <li>Resume arrow clears the scrollbar</li>
+            <li>Files-touched button laid out right</li>
+            <li>YOU and CLAUDE badges with icons</li>
+            <li>Stronger highlight on your turns</li>
+        </ul>
+        <h4>1.1.13</h4>
+        <ul>
+            <li>Automatic tags, no AI needed</li>
+            <li>Ticket id from the branch</li>
+            <li>Files touched is a dropdown</li>
+            <li>Copy one or many file paths</li>
+            <li>Search now matches branches</li>
+        </ul>
+        <h4>1.1.12</h4>
+        <ul>
+            <li>Redesigned session list</li>
+            <li>Two-line rows with tag chips</li>
+            <li>Redesigned transcript view</li>
+            <li>7-day usage per account</li>
+            <li>Prompt/output token counts</li>
+            <li>Top branches breakdown</li>
+            <li>Colour-blind-safe palette</li>
+        </ul>
+        <h4>1.1.11</h4>
+        <ul>
+            <li>Reworked terminal reachable</li>
+            <li>Resume tab matches + tab</li>
+        </ul>
+        <h4>1.1.10</h4>
+        <ul>
+            <li>Uses the reworked terminal</li>
+            <li>Same look as a + tab</li>
+        </ul>
+        <h4>1.1.9</h4>
+        <ul>
+            <li>Resume tab styling fixed</li>
+            <li>Matches a normally-opened tab</li>
+        </ul>
+        <h4>1.1.8</h4>
+        <ul>
+            <li>Resume colours fixed (truecolor)</li>
+            <li>Matches your normal terminal</li>
+        </ul>
+        <h4>1.1.7</h4>
+        <ul>
+            <li>Resume terminal engine fixed</li>
+            <li>Command now runs reliably</li>
+        </ul>
+        <h4>1.1.6</h4>
+        <ul>
+            <li>Resume uses your default terminal</li>
+            <li>Full terminal features restored</li>
+        </ul>
+        <h4>1.1.5</h4>
+        <ul>
+            <li>Daily refresh auto-installed</li>
+            <li>Per-account search scope</li>
+            <li>Account breakdown in stats</li>
+            <li>Nothing to configure</li>
+        </ul>
+        <h4>1.1.4</h4>
+        <ul>
+            <li>CLAUDE_CONFIG_DIR per account</li>
+            <li>Resume uses right account</li>
+            <li>Per-account MCP toggle</li>
+            <li>Config dir auto-derived</li>
+        </ul>
+        <h4>1.1.3</h4>
+        <ul>
+            <li>Environment dropdown</li>
+            <li>Switch Claude accounts</li>
+            <li>Add/remove environments</li>
+            <li>Per-account binary</li>
+        </ul>
+        <h4>1.1.2</h4>
+        <ul>
+            <li>Configurable session path</li>
+            <li>Configurable Claude binary</li>
+            <li>Multi-account switching</li>
+            <li>Auto-refresh toggle</li>
+            <li>Tag '#' prefix fixed</li>
+            <li>MCP bundled in plugin</li>
+            <li>One-click MCP setup</li>
+            <li>No uv required</li>
+        </ul>
+        <h4>1.1.0</h4>
+        <ul>
+            <li>MCP session search</li>
+            <li>Secrets auto-redacted</li>
+            <li>Visual stats charts</li>
+            <li>Claude memory gauge</li>
+            <li>Tags, AI-suggested</li>
+            <li>Pin sessions</li>
+            <li>Filter dropdown</li>
+            <li>Full-text search</li>
+            <li>Markdown export</li>
+            <li>Bulk delete</li>
+            <li>Files touched</li>
+            <li>Branch per row</li>
+            <li>Inline quick-resume</li>
+            <li>30s auto-refresh</li>
+            <li>Highlighted prompts</li>
+        </ul>
+        <h4>1.0.0</h4>
+        <ul>
+            <li>Browse sessions</li>
+            <li>Read transcripts</li>
+            <li>Resume in terminal</li>
+            <li>Rename titles</li>
+        </ul>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+            id="Claude Sessions"
+            anchor="left"
+            icon="AllIcons.Toolwindows.Documentation"
+            factoryClass="com.mahadi.claudesessions.ClaudeSessionsToolWindowFactory"/>
+
+        <notificationGroup id="Claude Sessions" displayType="BALLOON"/>
+
+        <fileEditorProvider implementation="com.mahadi.claudesessions.ClaudeSessionFileEditorProvider"/>
+    </extensions>
+</idea-plugin>

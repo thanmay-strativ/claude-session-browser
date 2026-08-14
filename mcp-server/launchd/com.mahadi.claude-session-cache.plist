@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mahadi.claude-session-cache</string>
+
+    <!-- The bundled install the plugin creates, so this keeps working without the
+         project checkout and without uv. Replace mahadi with your username. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/mahadi/.claude-session-browser/mcp-server/.venv/bin/claude-session-cache</string>
+        <string>ingest</string>
+    </array>
+
+    <!-- Catch up as soon as the agent is loaded (and after each login/boot). -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Then once a day at 03:00. If the Mac is asleep, launchd runs it on wake. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/mahadi/.claude-session-cache/ingest.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mahadi/.claude-session-cache/ingest.error.log</string>
+
+    <!-- uv needs a HOME to resolve its own cache and the project venv. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/mahadi</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>Nice</key>
+    <integer>5</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
