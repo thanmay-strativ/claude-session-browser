@@ -100,6 +100,19 @@ what gets indexed.
 Nothing else to configure — it finds `claude` and your session directory on its own. Python
 3.11+ only matters if you enable MCP.
 
+### Get automatic updates (optional, one-time)
+
+This plugin isn't on the JetBrains Marketplace, but it can still ride PyCharm's own update
+mechanism via a custom plugin repository:
+
+1. **Settings → Plugins → ⚙ → Manage Plugin Repositories → +**, and add:
+   ```
+   https://raw.githubusercontent.com/thanmay-strativ/claude-session-browser/main/updatePlugins.xml
+   ```
+
+From then on, PyCharm's normal **Check for Updates** finds new releases of this plugin,
+downloads them and installs on restart — no repeating steps 1–3 above.
+
 ## Build
 
 Requires a JDK 21 (set up with Homebrew's `openjdk@21`).

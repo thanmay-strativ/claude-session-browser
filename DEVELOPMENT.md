@@ -48,6 +48,7 @@ read the same file, so tags set in the UI become searchable dimensions in MCP.
 
 ```
 build.gradle.kts                 version, IntelliJ platform deps, MCP bundling task
+updatePlugins.xml                 custom repository descriptor for in-IDE auto-update (§5)
 src/main/resources/META-INF/plugin.xml   description + change-notes (bump with the version)
 src/main/kotlin/com/mahadi/claudesessions/
   ui/SessionBrowserPanel.kt      1057  tool window: toolbar, tree, painted row renderer, context menu
@@ -305,16 +306,28 @@ git commit -m "feat: <what changed>"        # or fix:/chore:, one line + bullets
 git tag -a v1.1.X -F -                      # annotated: carries message, tagger, date
 git describe --tags                          # must print v1.1.X
 git show v1.1.X:build.gradle.kts | grep '^version'   # must print the same 1.1.X
+git push -u origin main --follow-tags       # plain `git push` leaves tags behind
 ```
 
 The tag message should say what the release contains **and** name the zip it matches — that
 line is the only thing connecting a distributed build to its source.
 
-**8. Hand over** `build/distributions/claude-session-browser-1.1.X.zip`. Recipients install
-via *Settings → Plugins → ⚙ → Install Plugin from Disk…* and restart.
+**8. Publish the release and point the update-site at it.**
 
-Once a remote exists: `git push -u origin main --follow-tags` (plain `git push` leaves tags
-behind, which silently breaks the build-to-source link this checklist exists to maintain).
+```bash
+gh release create v1.1.X build/distributions/claude-session-browser-1.1.X.zip \
+  --title "v1.1.X" --notes "<match the change-notes bullets>"
+```
+
+Then bump `version` and `url` in `updatePlugins.xml` (repo root) to match, and commit that
+change to `main`. This is the file anyone's PyCharm reads for **Check for Updates** — see
+*Automatic updates* below. Skipping this step means the release exists but nobody's IDE will
+ever be offered it.
+
+**9. Hand over** `build/distributions/claude-session-browser-1.1.X.zip`. First-time
+installers use *Settings → Plugins → ⚙ → Install Plugin from Disk…* and restart; anyone who
+already added the update-site repository (README, *Get automatic updates*) gets this release
+through PyCharm's own updater instead.
 
 ### Verifying an artifact before sharing
 
@@ -357,6 +370,29 @@ grep -c "<new symbol>" "$MCP"/.venv/lib/python*/site-packages/claude_session_cac
 ```
 
 All three must agree — the source copy, the venv copy, and the live CLI.
+
+### Automatic updates (custom plugin repository)
+
+The plugin does not check the network for its own updates in code — no custom downloader,
+no reflection into internal Plugin Manager classes (the terminal saga in §7.1 is exactly the
+kind of trap that would invite). Instead it rides PyCharm's own update machinery via a
+**custom plugin repository**: a small XML descriptor, `updatePlugins.xml` at the repo root,
+hosted at
+
+```
+https://raw.githubusercontent.com/thanmay-strativ/claude-session-browser/main/updatePlugins.xml
+```
+
+Anyone who adds that URL once under *Settings → Plugins → ⚙ → Manage Plugin Repositories*
+(README, *Get automatic updates*) gets this plugin folded into PyCharm's normal **Check for
+Updates** — found, downloaded, verified and installed on restart, same as a Marketplace
+plugin.
+
+Keeping it working after every release is step 8 of the checklist above: bump `version` and
+`url` in `updatePlugins.xml` to the new tag and zip, and make sure that exact zip is attached
+to the matching GitHub Release — `url` must point at a release asset, not the repository
+itself. `since-build`/`until-build` in the descriptor should track `build.gradle.kts`'
+`ideaVersion` block.
 
 ---
 

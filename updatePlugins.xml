@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Custom plugin repository descriptor (JetBrains format:
+  https://plugins.jetbrains.com/docs/intellij/update-plugins-format.html).
+
+  Hosted at https://raw.githubusercontent.com/thanmay-strativ/claude-session-browser/main/updatePlugins.xml
+  Anyone who adds that URL under Settings -> Plugins -> Manage Plugin Repositories gets this
+  plugin in PyCharm's own "Check for Updates" - found, downloaded and installed on restart.
+
+  On every release: bump version/url below to the new tag and zip, and make sure that zip
+  is actually attached to the matching GitHub Release (see DEVELOPMENT.md, "Automatic
+  updates"). The url must point at a release asset, not the repo itself.
+-->
+<plugins>
+    <plugin id="com.mahadi.claudesessions"
+            url="https://github.com/thanmay-strativ/claude-session-browser/releases/download/v1.1.19/claude-session-browser-1.1.19.zip"
+            version="1.1.19">
+        <idea-version since-build="242" until-build="299.*"/>
+    </plugin>
+</plugins>
