@@ -9,10 +9,12 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Component
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import java.awt.geom.Rectangle2D
 import java.util.Locale
 import javax.swing.Icon
 import javax.swing.JComponent
@@ -126,6 +128,48 @@ internal object Ui {
         val top = bottom - barHeight
         graphics.fillRoundRect(x, top, barWidth, barHeight, radius, radius)
         graphics.fillRect(x, bottom - minOf(radius, barHeight), barWidth, minOf(radius, barHeight))
+    }
+}
+
+/**
+ * A bar chart, drawn rather than borrowed.
+ *
+ * The platform ships no chart icon — its "profiler" icons are semicircular gauges, which
+ * at 16px read as a cloud rather than as statistics. Three ascending columns over a
+ * baseline say what the button opens, and echo the column charts inside it. Painted in
+ * the toolbar icon tone so it sits level with the gear and refresh beside it.
+ */
+internal object BarChartIcon : Icon {
+
+    private val tone = JBColor(0x6C707E, 0xCED0D6)
+
+    override fun getIconWidth(): Int = JBUI.scale(16)
+
+    override fun getIconHeight(): Int = JBUI.scale(16)
+
+    override fun paintIcon(component: Component?, graphics: Graphics, x: Int, y: Int) {
+        val canvas = Ui.antialiased(graphics.create())
+        try {
+            canvas.color = tone
+            // Geometry is authored on a 16x16 grid and scaled, so it stays true at any DPI.
+            val unit = getIconWidth() / 16f
+            fun bar(left: Float, top: Float, barWidth: Float, barHeight: Float) {
+                canvas.fill(
+                    Rectangle2D.Float(
+                        x + left * unit,
+                        y + top * unit,
+                        barWidth * unit,
+                        barHeight * unit,
+                    )
+                )
+            }
+            bar(2f, 9f, 3f, 4f)
+            bar(6.5f, 5.5f, 3f, 7.5f)
+            bar(11f, 2.5f, 3f, 10.5f)
+            bar(1.5f, 13.5f, 13f, 1f)
+        } finally {
+            canvas.dispose()
+        }
     }
 }
 

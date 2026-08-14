@@ -197,7 +197,7 @@ class SessionBrowserPanel(
         })
         contentSearchCheckbox.addActionListener { onSearchChanged() }
 
-        val stats = toolbarButton(AllIcons.Actions.Profile, "Session statistics and health") {
+        val stats = toolbarButton(BarChartIcon, "Session statistics and health") {
             StatsDialog(project, allSessions).show()
         }
         val settings = toolbarButton(AllIcons.General.GearPlain, "Settings: environments, team sync") {
