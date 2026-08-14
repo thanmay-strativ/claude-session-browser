@@ -6,9 +6,10 @@ traps that are specific to this codebase.
 
 Current version: **1.1.19**. Target IDE: **PyCharm 2026.2** (built against IC 2025.2).
 
-> This project is **not under version control** — there is no `.git` directory. The release
-> artifact is the zip in `build/distributions/`. Treat `build.gradle.kts` + `plugin.xml` as
-> the only version record, and don't assume a branch workflow exists.
+> Under git since `a53798b` ("initial commit of Claude Session Browser 1.1.19"), on `main`,
+> tagged `v1.1.19`. **There is no remote yet** — until one is added, this machine holds the
+> only copy. Every release is an annotated tag; `git describe --tags` tells you which build
+> a working tree corresponds to.
 
 ---
 
@@ -263,16 +264,57 @@ Then **restart the IDE** — plugin classes are loaded once at startup, so an in
 a restart changes nothing. `rm -rf` first is not optional: leaving the old directory in
 place means two versioned jars in `lib/` and undefined class loading.
 
-### Releasing a version
+### Release checklist
 
-Both files must change together, in the same edit:
+Work top to bottom. Steps 1–2 must land in the same edit, and step 7 must not be skipped —
+an unreleased tag is worse than none, because `git describe` then lies about what a tree is.
 
-1. `build.gradle.kts` → `version = "1.1.X"` (this names the zip)
-2. `src/main/resources/META-INF/plugin.xml` → a new `<h4>1.1.X</h4>` block at the top of
-   `change-notes`, plus the `description` if a user-visible feature changed
+**1. Bump the version.** `build.gradle.kts` → `version = "1.1.X"`. This names the zip, so
+nothing else needs to know the number.
 
-Then `clean buildPlugin`, and hand over `build/distributions/claude-session-browser-1.1.X.zip`.
-Recipients install with *Settings → Plugins → ⚙ → Install Plugin from Disk…*
+**2. Write the change-notes.** `src/main/resources/META-INF/plugin.xml` → a new
+`<h4>1.1.X</h4>` block at the *top* of `change-notes`, four to eight short bullets in the
+voice of the existing entries (what changed for the user, not which class moved). Update
+`description` too if a user-visible feature was added or reworded.
+
+**3. Build clean.**
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+./gradlew clean buildPlugin        # -> build/distributions/claude-session-browser-1.1.X.zip
+```
+
+`clean` is not optional: without it a stale jar from the previous version can survive in the
+distribution directory and end up shipped alongside the new one.
+
+**4. Verify the artifact.** Run the block in *Verifying an artifact before sharing* below —
+`.py` count, no `__pycache__`, no dev paths, correct version stamp, control assertion passing.
+
+**5. Install and restart**, then actually exercise what changed. If the change touched
+`mcp-server/`, confirm the self-update landed in all three places (source copy, venv copy,
+live CLI — see *The Python is self-updating*).
+
+**6. Update the docs if behaviour changed.** `README.md` for anything a user would notice,
+this file for anything a maintainer would trip over. Add a row to *Version history* (§6).
+
+**7. Commit and tag.**
+
+```bash
+git add -A
+git commit -m "feat: <what changed>"        # or fix:/chore:, one line + bullets
+git tag -a v1.1.X -F -                      # annotated: carries message, tagger, date
+git describe --tags                          # must print v1.1.X
+git show v1.1.X:build.gradle.kts | grep '^version'   # must print the same 1.1.X
+```
+
+The tag message should say what the release contains **and** name the zip it matches — that
+line is the only thing connecting a distributed build to its source.
+
+**8. Hand over** `build/distributions/claude-session-browser-1.1.X.zip`. Recipients install
+via *Settings → Plugins → ⚙ → Install Plugin from Disk…* and restart.
+
+Once a remote exists: `git push -u origin main --follow-tags` (plain `git push` leaves tags
+behind, which silently breaks the build-to-source link this checklist exists to maintain).
 
 ### Verifying an artifact before sharing
 
@@ -469,7 +511,7 @@ Representative current numbers: 462 primary sessions · 70,518 messages indexed 
   than none.
 - **Tool-use split is all-time**, not windowed — that is what the cache gives cheaply.
 - **Sessions with no `gitBranch` field at all** show nothing in that slot (1 of 40 recent).
-- **`README.md` predates the redesign** and describes the old single-line rows and narrower
-  search. This file is the current reference.
+- **No git remote.** The repo, its history and the `v1.1.19` tag exist on one machine only.
+  This is the largest risk in the project, above anything in the code.
 - The 30s auto-refresh re-scans every transcript; fine at ~460 sessions, unmeasured at
   several thousand.
