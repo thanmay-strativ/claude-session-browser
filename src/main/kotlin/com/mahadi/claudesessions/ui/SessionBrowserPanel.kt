@@ -1012,6 +1012,20 @@ private class SessionRowRenderer : JComponent(), TreeCellRenderer {
         canvas.drawString(meta, contentLeft, metaBaseline)
 
         paintChips(canvas, contentLeft + metaMetrics.stringWidth(meta) + JBUI.scale(6), metaBaseline, metaMetrics)
+        paintRowDivider(canvas, contentLeft)
+    }
+
+    /**
+     * A one-pixel rule along the bottom of each row, indented to the text column.
+     *
+     * Unscaled height keeps it a true hairline on HiDPI, and it is skipped while the row
+     * is selected — the selection fill already bounds the row, so a line inside it would
+     * read as an artefact.
+     */
+    private fun paintRowDivider(canvas: Graphics2D, left: Int) {
+        if (isSelected) return
+        canvas.color = Ui.HAIRLINE
+        canvas.fillRect(left, height - 1, width - left - JBUI.scale(4), 1)
     }
 
     /**

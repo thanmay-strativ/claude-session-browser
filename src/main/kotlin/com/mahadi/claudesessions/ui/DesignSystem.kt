@@ -48,6 +48,16 @@ internal object Ui {
 
     val CARD_SURFACE = JBColor(0xFFFFFF, 0x313438)
     val CARD_BORDER = JBColor(0xE1E4E8, 0x393B40)
+
+    /**
+     * The faintest rule that still separates: barely-there in both themes, so a long list
+     * gains rhythm without the page turning into a grid. Deliberately lighter than
+     * [CARD_BORDER] — this divides items *inside* one surface, it does not enclose them.
+     */
+    val HAIRLINE: JBColor = JBColor(
+        ColorUtil.withAlpha(Color(0x0B, 0x0D, 0x12), 0.055),
+        ColorUtil.withAlpha(Color(0xFF, 0xFF, 0xFF), 0.055),
+    )
     val TRACK = JBColor(0xE8EDF5, 0x3A3D41)
     val CHIP_SURFACE = JBColor(0xEEF2F8, 0x383B41)
     val CODE_SURFACE = JBColor(0xF6F7F9, 0x2B2D30)
@@ -116,6 +126,29 @@ internal object Ui {
         val top = bottom - barHeight
         graphics.fillRoundRect(x, top, barWidth, barHeight, radius, radius)
         graphics.fillRect(x, bottom - minOf(radius, barHeight), barWidth, minOf(radius, barHeight))
+    }
+}
+
+/**
+ * A one-pixel rule for separating stacked items.
+ *
+ * Height is left unscaled on purpose: [JBUI.scale] would thicken it to two or three
+ * device pixels on a HiDPI display, which is exactly the heaviness this is avoiding.
+ * [inset] keeps the rule clear of the text it divides.
+ */
+internal class Hairline(private val inset: Int = 0) : JComponent() {
+
+    init {
+        isOpaque = false
+        alignmentX = LEFT_ALIGNMENT
+        preferredSize = Dimension(1, 1)
+        maximumSize = Dimension(Int.MAX_VALUE, 1)
+        minimumSize = Dimension(1, 1)
+    }
+
+    override fun paintComponent(graphics: Graphics) {
+        graphics.color = Ui.HAIRLINE
+        graphics.fillRect(inset, 0, (width - inset * 2).coerceAtLeast(0), 1)
     }
 }
 

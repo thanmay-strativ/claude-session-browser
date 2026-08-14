@@ -1,8 +1,10 @@
 package com.mahadi.claudesessions.ui
 
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
@@ -41,11 +43,13 @@ import java.awt.Graphics
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.swing.BoxLayout
+import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JSpinner
 import javax.swing.ListSelectionModel
 import javax.swing.SpinnerNumberModel
+import javax.swing.SwingConstants
 import javax.swing.event.DocumentEvent
 
 private class EditableEnvironment(
@@ -116,7 +120,17 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     }
     private val ownerField = JBTextField()
     private val scopeCombo = JComboBox(arrayOf(SCOPE_MINE_LABEL, SCOPE_TEAM_LABEL))
-    private val projectList = CheckBoxList<String>()
+    private val projectList = CheckBoxList<String>().apply {
+        setCheckBoxListListener { _, _ -> updateProjectsSummary() }
+    }
+    private val projectsButton = JButton().apply {
+        horizontalAlignment = SwingConstants.LEFT
+        horizontalTextPosition = SwingConstants.LEADING
+        icon = AllIcons.General.ArrowDown
+        iconTextGap = JBUI.scale(8)
+        isFocusable = false
+        addActionListener { showProjectsPopup() }
+    }
     private val minMessagesSpinner = JSpinner(SpinnerNumberModel(TeamSyncConfig.DEFAULT_MIN_MESSAGES, 0, 999, 1))
     private val maxAgeSpinner = JSpinner(SpinnerNumberModel(0, 0, 3650, 30))
     private val redactionArea = JBTextArea(4, 40).apply {
@@ -179,6 +193,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         syncHoursField.text = config.syncHours.joinToString(", ")
 
         config.projects.forEach { projectList.addItem(it, it, true) }
+        updateProjectsSummary()
         refreshStatusBanner()
         updateSyncFieldsEnabled()
     }
@@ -199,9 +214,49 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                         .filter { it.label !in alreadyListed }
                         .sortedByDescending { it.count }
                         .forEach { projectList.addItem(it.label, "${it.label}  (${it.count} sessions)", false) }
+                    updateProjectsSummary()
                 },
                 ModalityState.any(),
             )
+        }
+    }
+
+    /**
+     * The project list lives in a dropdown rather than inline: it is as long as the
+     * user's project history, and a scrolling box wired into the form pushed everything
+     * below it off the visible area.
+     */
+    private fun showProjectsPopup() {
+        if (projectList.itemsCount == 0) return
+        val scrollPane = JBScrollPane(projectList).apply {
+            preferredSize = Dimension(
+                maxOf(projectsButton.width, JBUI.scale(320)),
+                JBUI.scale(240),
+            )
+        }
+        JBPopupFactory.getInstance()
+            .createComponentPopupBuilder(scrollPane, projectList)
+            .setRequestFocus(true)
+            .setResizable(true)
+            .setMovable(false)
+            .setCancelOnClickOutside(true)
+            .createPopup()
+            .showUnderneathOf(projectsButton)
+    }
+
+    private fun updateProjectsSummary() {
+        val selected = selectedProjects()
+        projectsButton.text = when {
+            projectList.itemsCount == 0 -> "No projects indexed yet"
+            selected.isEmpty() -> "None selected — nothing will be shared"
+            selected.size == 1 -> selected.single()
+            selected.size <= 3 -> selected.joinToString(", ")
+            else -> "${selected.take(2).joinToString(", ")} +${selected.size - 2} more"
+        }
+        projectsButton.toolTipText = if (selected.isEmpty()) {
+            "No projects ticked — team sync would publish nothing."
+        } else {
+            "<html>Sharing:<br>${selected.joinToString("<br>")}</html>"
         }
     }
 
@@ -249,7 +304,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     private fun updateSyncFieldsEnabled() {
         val enabled = syncEnabledCheckbox.isSelected
         listOf<JComponent>(
-            repoUrlField, repoPathField, ownerField, scopeCombo, projectList,
+            repoUrlField, repoPathField, ownerField, scopeCombo, projectsButton,
             minMessagesSpinner, maxAgeSpinner, redactionArea, syncHoursField,
             pauseCheckbox, notifyCheckbox,
         ).forEach { it.isEnabled = enabled }
@@ -330,6 +385,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                     add(listPanel)
                 }
             )
+            add(divider())
             add(
                 section("Selected account", null) {
                     add(field("Name", nameField, "Shown in the toolbar dropdown, e.g. claude or claude-work."))
@@ -372,6 +428,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 add(checkboxRow(pauseCheckbox))
             }
         )
+        add(divider())
         add(
             section("Repository", null) {
                 add(
@@ -398,6 +455,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 )
             }
         )
+        add(divider())
         add(
             section(
                 "What gets shared",
@@ -407,11 +465,8 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 add(
                     field(
                         "Projects",
-                        JBScrollPane(projectList).apply {
-                            preferredSize = Dimension(JBUI.scale(560), JBUI.scale(120))
-                            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(120))
-                        },
-                        "Ticked projects sync. The list is drawn from your indexed history.",
+                        projectsButton,
+                        "Open the list and tick the projects to share. Drawn from your indexed history.",
                     )
                 )
                 add(
@@ -433,6 +488,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 )
             }
         )
+        add(divider())
         add(
             section("Claude's search", null) {
                 add(
@@ -445,6 +501,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 )
             }
         )
+        add(divider())
         add(
             section(
                 "Safety",
@@ -464,6 +521,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 add(checkboxRow(notifyCheckbox))
             }
         )
+        add(divider())
         add(
             section("Schedule", null) {
                 add(
@@ -492,6 +550,15 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
             border = JBUI.Borders.empty(10, 12)
             content()
         }
+
+    /** A hairline with air either side, separating one card of settings from the next. */
+    private fun divider(): JComponent = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+        isOpaque = false
+        alignmentX = Component.LEFT_ALIGNMENT
+        border = JBUI.Borders.empty(6, 4)
+        maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(13))
+        add(Hairline(), BorderLayout.CENTER)
+    }
 
     /** A titled card: the unit the form is read in, rather than one long ladder of labels. */
     private fun section(

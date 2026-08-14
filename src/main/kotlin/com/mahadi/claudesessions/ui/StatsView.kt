@@ -143,9 +143,21 @@ private class HealthPanel : JBPanel<HealthPanel>(BorderLayout()) {
     private fun populate(target: JBPanel<*>, title: String, checks: List<HealthCheckService.Check>) {
         target.removeAll()
         target.add(Ui.sectionTitle(title))
-        checks.forEach { check -> target.add(checkCard(check)) }
+        checks.forEachIndexed { index, check ->
+            if (index > 0) target.add(hairlineSpacer())
+            target.add(checkCard(check))
+        }
         target.revalidate()
         target.repaint()
+    }
+
+    /** A hairline with air either side, so stacked cards read as one list of checks. */
+    private fun hairlineSpacer(): JComponent = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+        isOpaque = false
+        alignmentX = LEFT_ALIGNMENT
+        border = JBUI.Borders.empty(5, 2)
+        maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(11))
+        add(Hairline(), BorderLayout.CENTER)
     }
 
     /**
