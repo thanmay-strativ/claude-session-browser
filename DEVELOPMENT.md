@@ -6,10 +6,10 @@ traps that are specific to this codebase.
 
 Current version: **1.1.19**. Target IDE: **PyCharm 2026.2** (built against IC 2025.2).
 
-> Under git since `a53798b` ("initial commit of Claude Session Browser 1.1.19"), on `main`,
-> tagged `v1.1.19`. **There is no remote yet** — until one is added, this machine holds the
-> only copy. Every release is an annotated tag; `git describe --tags` tells you which build
-> a working tree corresponds to.
+> Under git since `4a44699` ("initial commit of Claude Session Browser 1.1.19"), on `main`,
+> tagged `v1.1.19`, published at
+> <https://github.com/thanmay-strativ/claude-session-browser>. Every release is an annotated
+> tag, so `git describe --tags` tells you which build a working tree corresponds to.
 
 ---
 
@@ -511,7 +511,8 @@ the most-revisited single file appeared in 57 sessions.
   than none.
 - **Tool-use split is all-time**, not windowed — that is what the cache gives cheaply.
 - **Sessions with no `gitBranch` field at all** show nothing in that slot (1 of 40 recent).
-- **No git remote.** The repo, its history and the `v1.1.19` tag exist on one machine only.
-  This is the largest risk in the project, above anything in the code.
+- **The repo is public**, so anything committed is published. Examples in these docs use
+  placeholders (`/Users/YOUR_USERNAME`, `PROJ-1234`) rather than real paths or ticket ids —
+  keep it that way. Commits are authored under a GitHub noreply alias, not a real address.
 - The 30s auto-refresh re-scans every transcript; fine at ~460 sessions, unmeasured at
   several thousand.
