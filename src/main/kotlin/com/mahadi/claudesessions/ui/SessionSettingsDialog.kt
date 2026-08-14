@@ -24,6 +24,8 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
+import com.intellij.ui.components.fields.ExtendableTextComponent
+import com.intellij.ui.components.fields.ExtendableTextField
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
@@ -40,16 +42,17 @@ import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Graphics
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.swing.BoxLayout
-import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JSpinner
 import javax.swing.ListSelectionModel
+import javax.swing.ScrollPaneConstants
 import javax.swing.SpinnerNumberModel
-import javax.swing.SwingConstants
 import javax.swing.event.DocumentEvent
 
 private class EditableEnvironment(
@@ -63,6 +66,9 @@ private class EditableEnvironment(
 
 private const val SCOPE_MINE_LABEL = "My sessions only"
 private const val SCOPE_TEAM_LABEL = "The whole team's sessions"
+
+/** CSS px for wrapping hint text; see [SessionSettingsDialog.wrapped] for why it is not scaled. */
+private const val HINT_WRAP_WIDTH = 440
 
 /**
  * The plugin's settings: Claude environments, team knowledge-base sync, and general
@@ -123,17 +129,28 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     private val projectList = CheckBoxList<String>().apply {
         setCheckBoxListListener { _, _ -> updateProjectsSummary() }
     }
-    private val projectsButton = JButton().apply {
-        horizontalAlignment = SwingConstants.LEFT
-        horizontalTextPosition = SwingConstants.LEADING
-        icon = AllIcons.General.ArrowDown
-        iconTextGap = JBUI.scale(8)
-        isFocusable = false
-        addActionListener { showProjectsPopup() }
+    /**
+     * A read-only field with a dropdown affordance rather than a button: the macOS
+     * look-and-feel centres and upper-cases button text, which turned the selected
+     * project into a shouted "TOURBOOKER" with the arrow stranded at the far left.
+     */
+    private val projectsField = ExtendableTextField().apply {
+        isEditable = false
+        addExtension(
+            ExtendableTextComponent.Extension.create(
+                AllIcons.General.ArrowDown,
+                "Choose which projects to share",
+            ) { showProjectsPopup() }
+        )
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(event: MouseEvent) {
+                if (isEnabled) showProjectsPopup()
+            }
+        })
     }
     private val minMessagesSpinner = JSpinner(SpinnerNumberModel(TeamSyncConfig.DEFAULT_MIN_MESSAGES, 0, 999, 1))
     private val maxAgeSpinner = JSpinner(SpinnerNumberModel(0, 0, 3650, 30))
-    private val redactionArea = JBTextArea(4, 40).apply {
+    private val redactionArea = JBTextArea(4, 20).apply {
         lineWrap = false
         font = JBFont.small()
     }
@@ -230,7 +247,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         if (projectList.itemsCount == 0) return
         val scrollPane = JBScrollPane(projectList).apply {
             preferredSize = Dimension(
-                maxOf(projectsButton.width, JBUI.scale(320)),
+                maxOf(projectsField.width, JBUI.scale(320)),
                 JBUI.scale(240),
             )
         }
@@ -241,19 +258,19 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
             .setMovable(false)
             .setCancelOnClickOutside(true)
             .createPopup()
-            .showUnderneathOf(projectsButton)
+            .showUnderneathOf(projectsField)
     }
 
     private fun updateProjectsSummary() {
         val selected = selectedProjects()
-        projectsButton.text = when {
+        projectsField.text = when {
             projectList.itemsCount == 0 -> "No projects indexed yet"
             selected.isEmpty() -> "None selected — nothing will be shared"
             selected.size == 1 -> selected.single()
             selected.size <= 3 -> selected.joinToString(", ")
             else -> "${selected.take(2).joinToString(", ")} +${selected.size - 2} more"
         }
-        projectsButton.toolTipText = if (selected.isEmpty()) {
+        projectsField.toolTipText = if (selected.isEmpty()) {
             "No projects ticked — team sync would publish nothing."
         } else {
             "<html>Sharing:<br>${selected.joinToString("<br>")}</html>"
@@ -304,7 +321,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     private fun updateSyncFieldsEnabled() {
         val enabled = syncEnabledCheckbox.isSelected
         listOf<JComponent>(
-            repoUrlField, repoPathField, ownerField, scopeCombo, projectsButton,
+            repoUrlField, repoPathField, ownerField, scopeCombo, projectsField,
             minMessagesSpinner, maxAgeSpinner, redactionArea, syncHoursField,
             pauseCheckbox, notifyCheckbox,
         ).forEach { it.isEnabled = enabled }
@@ -358,9 +375,16 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         addTab("General", scrollable(generalTab()))
     }
 
+    /**
+     * Never scrolls sideways: a form has no business having a horizontal scrollbar, and
+     * one appearing was what pushed the cards under the vertical bar and clipped their
+     * right edge. Content must fit the width; only the height may overflow.
+     */
     private fun scrollable(content: JComponent): JComponent = JBScrollPane(content).apply {
         border = JBUI.Borders.empty()
         verticalScrollBar.unitIncrement = JBUI.scale(16)
+        horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+        verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
     }
 
     private fun environmentsTab(): JComponent {
@@ -372,7 +396,9 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
             .createPanel()
             .apply {
                 alignmentX = Component.LEFT_ALIGNMENT
-                preferredSize = Dimension(JBUI.scale(560), JBUI.scale(120))
+                // Narrow preferred width, unbounded maximum: BoxLayout stretches it to the
+                // viewport, and a wide preferred width would drag the whole dialog with it.
+                preferredSize = Dimension(JBUI.scale(320), JBUI.scale(120))
                 maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(120))
             }
 
@@ -465,7 +491,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 add(
                     field(
                         "Projects",
-                        projectsButton,
+                        projectsField,
                         "Open the list and tick the projects to share. Drawn from your indexed history.",
                     )
                 )
@@ -511,7 +537,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                     field(
                         "Extra redaction patterns",
                         JBScrollPane(redactionArea).apply {
-                            preferredSize = Dimension(JBUI.scale(560), JBUI.scale(76))
+                            preferredSize = Dimension(JBUI.scale(320), JBUI.scale(76))
                             maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(76))
                         },
                         "One regular expression per line — internal hostnames, customer names. " +
@@ -547,7 +573,9 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         JBPanel<JBPanel<*>>().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             background = UIUtil.getPanelBackground()
-            border = JBUI.Borders.empty(10, 12)
+            // Wider inset on the right so cards clear the vertical scrollbar instead of
+            // running underneath it.
+            border = JBUI.Borders.empty(10, 12, 10, 18)
             content()
         }
 
@@ -658,9 +686,15 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
             })
         }
 
-    /** Long hints must wrap instead of stretching the dialog to their natural width. */
+    /**
+     * Long hints must wrap instead of stretching the dialog to their natural width.
+     *
+     * The width is a literal, deliberately **not** [JBUI.scale]d: the number is CSS px
+     * inside Swing's HTML renderer, which does not share JBUI's scaling, so scaling it
+     * made every hint twice as wide as intended and forced the whole form to overflow.
+     */
     private fun wrapped(text: String): String =
-        "<html><body style='width: ${JBUI.scale(520)}px'>$text</body></html>"
+        "<html><body style='width: ${HINT_WRAP_WIDTH}px'>$text</body></html>"
 
     private fun onSelectionChanged() {
         flushEditing()

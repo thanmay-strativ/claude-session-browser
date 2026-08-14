@@ -35,6 +35,7 @@ import java.time.temporal.ChronoUnit
 import java.util.Locale
 import javax.swing.BoxLayout
 import javax.swing.JComponent
+import javax.swing.ScrollPaneConstants
 import javax.swing.ToolTipManager
 
 private const val USAGE_WINDOW_DAYS = 7
@@ -44,6 +45,13 @@ private const val BREAKDOWN_LIMIT = 8
 private const val HEAVIEST_LIMIT = 5
 private const val MODEL_CHART_THRESHOLD = 3
 private const val QUIET_SESSION_MESSAGES = 2
+
+/**
+ * CSS px for wrapping a health check's detail line. A literal, not [JBUI.scale]d: this is
+ * consumed by Swing's HTML renderer, which does not share JBUI's scaling, so scaling it
+ * made every card wider than the dialog and clipped the labels.
+ */
+private const val DETAIL_WRAP_WIDTH = 330
 
 private val DAY_LABEL: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.ROOT)
 private val DAY_TOOLTIP: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.ROOT)
@@ -105,6 +113,9 @@ private class HealthPanel : JBPanel<HealthPanel>(BorderLayout()) {
             JBScrollPane(content).apply {
                 border = JBUI.Borders.empty()
                 verticalScrollBar.unitIncrement = JBUI.scale(16)
+                // Height may overflow; width never. A horizontal scrollbar here clipped the
+                // check labels and painted itself over the last row.
+                horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
             },
             BorderLayout.CENTER,
         )
@@ -188,7 +199,7 @@ private class HealthPanel : JBPanel<HealthPanel>(BorderLayout()) {
             isOpaque = false
             add(heading)
             add(
-                JBLabel("<html><body style='width: ${JBUI.scale(400)}px'>${check.detail}</body></html>").apply {
+                JBLabel("<html><body style='width: ${DETAIL_WRAP_WIDTH}px'>${check.detail}</body></html>").apply {
                     foreground = Ui.inkMuted
                     font = JBFont.small()
                     alignmentX = LEFT_ALIGNMENT
@@ -259,6 +270,7 @@ private class StatsPanel(private val sessions: List<ClaudeSession>) : JBPanel<St
             JBScrollPane(content).apply {
                 border = JBUI.Borders.empty()
                 verticalScrollBar.unitIncrement = JBUI.scale(16)
+                horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
             },
             BorderLayout.CENTER,
         )
