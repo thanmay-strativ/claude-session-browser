@@ -552,6 +552,11 @@ class SessionBrowserPanel(
             add(menuItem(if (SessionMetadataStore.isPinned(session.sessionId)) "Unpin session" else "Pin session") {
                 togglePin(session)
             })
+            add(
+                menuItem(
+                    if (SessionMetadataStore.isExcludedFromSync(session.sessionId)) "Unmark private" else "Mark private"
+                ) { togglePrivate(session) }
+            )
             addSeparator()
             add(menuItem("Export as Markdown…") { SessionExporter.export(project, session) })
             addSeparator()
@@ -631,6 +636,14 @@ class SessionBrowserPanel(
 
     private fun togglePin(session: ClaudeSession) {
         SessionMetadataStore.setPinned(session.sessionId, !SessionMetadataStore.isPinned(session.sessionId))
+        rebuildTree(searchField.text)
+    }
+
+    private fun togglePrivate(session: ClaudeSession) {
+        SessionMetadataStore.setExcludedFromSync(
+            session.sessionId,
+            !SessionMetadataStore.isExcludedFromSync(session.sessionId),
+        )
         rebuildTree(searchField.text)
     }
 

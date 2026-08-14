@@ -11,7 +11,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DEFAULT_CACHE_DIR = Path(os.environ.get("CLAUDE_SESSION_CACHE_DIR", Path.home() / ".claude-session-cache"))
 DEFAULT_DB_PATH = DEFAULT_CACHE_DIR / "sessions.db"
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     message_count     INTEGER NOT NULL DEFAULT 0,
     source_path       TEXT NOT NULL,
     source_root       TEXT,
+    owner             TEXT,
     source_mtime      REAL NOT NULL,
     source_size       INTEGER NOT NULL,
     ingested_lines    INTEGER NOT NULL DEFAULT 0
@@ -100,6 +101,7 @@ END;
 _INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_sessions_project   ON sessions(project_path);
 CREATE INDEX IF NOT EXISTS idx_sessions_root      ON sessions(source_root);
+CREATE INDEX IF NOT EXISTS idx_sessions_owner     ON sessions(owner);
 CREATE INDEX IF NOT EXISTS idx_sessions_branch    ON sessions(git_branch);
 CREATE INDEX IF NOT EXISTS idx_sessions_activity  ON sessions(last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_session   ON messages(session_id, seq);
@@ -150,6 +152,8 @@ def _apply_version_migrations(connection: sqlite3.Connection) -> None:
     if version < 3:
         _add_column_if_missing(connection, "sessions", "source_root", "TEXT")
         _backfill_source_root(connection)
+    if version < 4:
+        _add_column_if_missing(connection, "sessions", "owner", "TEXT")
 
     connection.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
 

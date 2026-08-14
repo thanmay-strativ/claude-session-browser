@@ -335,10 +335,10 @@ Always include a **control assertion** — a string known to be present must mat
 silently failing grep cannot read as "clean":
 
 ```bash
-ZIP=build/distributions/claude-session-browser-1.1.19.zip
-unzip -p "$ZIP" "claude-session-browser/lib/claude-session-browser-1.1.19.jar" > /tmp/csb.jar
+ZIP=build/distributions/claude-session-browser-1.2.0.zip
+unzip -p "$ZIP" "claude-session-browser/lib/claude-session-browser-1.2.0.jar" > /tmp/csb.jar
 
-unzip -l /tmp/csb.jar | grep -c "mcp-server.*\.py"      # expect 9
+unzip -l /tmp/csb.jar | grep -c "mcp-server.*\.py"      # expect 10 (sync.py since 1.2.0)
 unzip -l /tmp/csb.jar | grep -c "__pycache__"           # expect 0
 mkdir -p /tmp/csbcheck && unzip -q -o /tmp/csb.jar "mcp-server/*" -d /tmp/csbcheck
 grep -rn "/Users/" /tmp/csbcheck | wc -l                # expect 0 — no dev paths shipped
@@ -412,6 +412,7 @@ itself. `since-build`/`until-build` in the descriptor should track `build.gradle
 | 1.1.17 | Daily activity chart; week-on-week change; active days; heaviest sessions; files you return to; commits + cache freshness; housekeeping; filler tiles dropped; **session cache self-updates** |
 | 1.1.18 | Tool use split, MCP tools grouped by server |
 | 1.1.19 | Branch always visible on a row; shortens instead of disappearing; detached `HEAD` shown |
+| 1.2.0 | **Team knowledge base**: schema v4 `owner` column; `export`/`import`/`sync` CLI (per-session JSONL in a private git repo, tombstones retract Mark-private sessions); `scope` on the MCP search tools; twice-daily launchd sync agent; tabbed settings with Team Sync; Health tab (launchd state, per-account MCP, tools); MCP registration covers every account; auto-tagger stdin/stderr fix |
 
 ---
 

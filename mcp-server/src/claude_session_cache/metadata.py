@@ -27,6 +27,21 @@ class SessionMetadata:
     title: str | None = None
     pinned: bool = False
     tags: list[str] = field(default_factory=list)
+    exclude_from_sync: bool = False
+
+
+@dataclass
+class TeamSyncConfig:
+    """Team knowledge-base settings, written by the plugin's settings dialog."""
+
+    enabled: bool = False
+    repo_path: Path | None = None
+    repo_url: str | None = None
+    owner: str | None = None
+    projects: list[str] = field(default_factory=list)
+
+    def is_usable(self) -> bool:
+        return self.enabled and self.repo_path is not None and bool(self.owner)
 
 
 def _clean_tags(tags: object) -> list[str]:
@@ -86,5 +101,27 @@ def load_metadata(path: Path | None = None) -> dict[str, SessionMetadata]:
             title=title.strip() if isinstance(title, str) and title.strip() else None,
             pinned=bool(raw.get("pinned", False)),
             tags=_clean_tags(tags),
+            exclude_from_sync=bool(raw.get("excludeFromSync", False)),
         )
     return result
+
+
+def load_team_sync(path: Path | None = None) -> TeamSyncConfig:
+    """Load the team sync settings, returning a disabled config when none are stored."""
+    raw = _read_sidecar(path).get("teamSync")
+    if not isinstance(raw, dict):
+        return TeamSyncConfig()
+
+    repo_path = raw.get("repoPath")
+    repo_url = raw.get("repoUrl")
+    owner = raw.get("owner")
+    projects = raw.get("projects")
+    return TeamSyncConfig(
+        enabled=bool(raw.get("enabled", False)),
+        repo_path=Path(repo_path.strip()).expanduser() if isinstance(repo_path, str) and repo_path.strip() else None,
+        repo_url=repo_url.strip() if isinstance(repo_url, str) and repo_url.strip() else None,
+        owner=owner.strip() if isinstance(owner, str) and owner.strip() else None,
+        projects=[name.strip() for name in projects if isinstance(name, str) and name.strip()]
+        if isinstance(projects, list)
+        else [],
+    )

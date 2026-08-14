@@ -20,8 +20,9 @@ private data class SessionEntry(
     var title: String? = null,
     var pinned: Boolean = false,
     var tags: MutableList<String> = mutableListOf(),
+    var excludeFromSync: Boolean = false,
 ) {
-    fun isEmpty(): Boolean = title.isNullOrBlank() && !pinned && tags.isEmpty()
+    fun isEmpty(): Boolean = title.isNullOrBlank() && !pinned && tags.isEmpty() && !excludeFromSync
 }
 
 private data class EnvironmentEntry(
@@ -31,12 +32,22 @@ private data class EnvironmentEntry(
     var configDir: String? = null,
 )
 
+private data class TeamSyncEntry(
+    var enabled: Boolean = false,
+    var repoPath: String? = null,
+    var repoUrl: String? = null,
+    var owner: String? = null,
+    var projects: MutableList<String> = mutableListOf(),
+    var syncHours: MutableList<Int> = mutableListOf(),
+)
+
 private data class MetadataFile(
     var version: Int = 1,
     var sessionRoot: String? = null,
     var claudeBinary: String? = null,
     var environments: MutableList<EnvironmentEntry> = mutableListOf(),
     var activeEnvironment: String? = null,
+    var teamSync: TeamSyncEntry? = null,
     var sessions: MutableMap<String, SessionEntry> = mutableMapOf(),
 )
 
@@ -74,6 +85,15 @@ object SessionMetadataStore {
 
     fun setPinned(sessionId: String, pinned: Boolean) = synchronized(this) {
         mutate(sessionId) { it.pinned = pinned }
+    }
+
+    /** True when the user has marked this session to be kept out of any future team sync/export. */
+    fun isExcludedFromSync(sessionId: String): Boolean = synchronized(this) {
+        entry(sessionId)?.excludeFromSync ?: false
+    }
+
+    fun setExcludedFromSync(sessionId: String, excluded: Boolean) = synchronized(this) {
+        mutate(sessionId) { it.excludeFromSync = excluded }
     }
 
     fun tags(sessionId: String): List<String> = synchronized(this) {
@@ -134,6 +154,33 @@ object SessionMetadataStore {
         val metadata = load()
         metadata.environments = entries
         metadata.activeEnvironment = entries.firstOrNull { it.name == activeName }?.name ?: entries.first().name
+        save(metadata)
+    }
+
+    /** Team knowledge-base sync settings; a disabled default when never configured. */
+    fun teamSync(): TeamSyncConfig = synchronized(this) {
+        val entry = load().teamSync ?: return TeamSyncConfig()
+        TeamSyncConfig(
+            enabled = entry.enabled,
+            repoPath = entry.repoPath?.trim()?.takeIf { it.isNotEmpty() },
+            repoUrl = entry.repoUrl?.trim()?.takeIf { it.isNotEmpty() },
+            owner = entry.owner?.trim()?.takeIf { it.isNotEmpty() },
+            projects = entry.projects.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+            syncHours = entry.syncHours.filter { it in 0..23 }.distinct().sorted()
+                .ifEmpty { TeamSyncConfig.DEFAULT_SYNC_HOURS },
+        )
+    }
+
+    fun setTeamSync(config: TeamSyncConfig) = synchronized(this) {
+        val metadata = load()
+        metadata.teamSync = TeamSyncEntry(
+            enabled = config.enabled,
+            repoPath = config.repoPath?.trim()?.takeIf { it.isNotEmpty() },
+            repoUrl = config.repoUrl?.trim()?.takeIf { it.isNotEmpty() },
+            owner = config.owner?.trim()?.takeIf { it.isNotEmpty() },
+            projects = config.projects.map { it.trim() }.filter { it.isNotEmpty() }.distinct().toMutableList(),
+            syncHours = config.syncHours.filter { it in 0..23 }.distinct().sorted().toMutableList(),
+        )
         save(metadata)
     }
 

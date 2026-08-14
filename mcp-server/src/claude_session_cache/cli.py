@@ -1,4 +1,4 @@
-"""Command line entry point: `ingest`, `serve` and `stats`."""
+"""Command line entry point: `ingest`, `serve`, `stats`, `export`, `import` and `sync`."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pathlib import Path
 from . import queries
 from .db import DEFAULT_DB_PATH, connect
 from .ingest import DEFAULT_PROJECTS_DIR, ingest
+from .metadata import load_team_sync
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,6 +38,17 @@ def main(argv: list[str] | None = None) -> int:
     search_parser = subparsers.add_parser("search", help="search the cache from the terminal")
     search_parser.add_argument("query")
     search_parser.add_argument("--limit", type=int, default=10)
+
+    export_parser = subparsers.add_parser("export", help="write own sessions into the team knowledge-base repo")
+    _add_sync_arguments(export_parser)
+    export_parser.add_argument(
+        "--project", action="append", default=None, help="project allowlist (default: from plugin settings)"
+    )
+
+    import_parser = subparsers.add_parser("import", help="read teammates' sessions from the knowledge-base repo")
+    _add_sync_arguments(import_parser)
+
+    subparsers.add_parser("sync", help="full cycle: pull, import, ingest, export, secret-scan, push")
 
     args = parser.parse_args(argv)
 
@@ -66,7 +78,46 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(results)} result(s) [{match_mode}]")
         return 0
 
+    if args.command in ("export", "import"):
+        from .sync import export_sessions, import_sessions
+
+        config = load_team_sync()
+        repo_path = args.repo or config.repo_path
+        owner = args.owner or config.owner
+        if repo_path is None or not owner:
+            print(
+                "Team sync is not configured: set the repo path and owner in the plugin's "
+                "settings, or pass --repo and --owner.",
+                file=sys.stderr,
+            )
+            return 2
+
+        if args.command == "export":
+            projects = args.project or config.projects
+            stats = export_sessions(connection, repo_path, owner, projects)
+        else:
+            stats = import_sessions(connection, repo_path, owner)
+        connection.commit()
+        print(json.dumps(stats.as_dict(), indent=2))
+        return 0
+
+    if args.command == "sync":
+        from .sync import run_sync
+
+        stats = run_sync(connection)
+        print(json.dumps(stats.as_dict(), indent=2))
+        return 0 if all(step.get("ok") for step in stats.steps) else 1
+
     return 1
+
+
+def _add_sync_arguments(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument(
+        "--repo", type=Path, default=None, help="knowledge-base repo path (default: from plugin settings)"
+    )
+    subparser.add_argument(
+        "--owner", default=None, help="this machine's owner id, e.g. a work email (default: from plugin settings)"
+    )
 
 
 if __name__ == "__main__":

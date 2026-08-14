@@ -9,8 +9,13 @@ private val LOG = logger<McpRuntime>()
 
 private const val SETUP_TIMEOUT_SECONDS = 300L
 
-private const val REFRESH_AGENT_LABEL = "com.mahadi.claude-session-cache"
+internal const val REFRESH_AGENT_LABEL = "com.mahadi.claude-session-cache"
 private const val REFRESH_HOUR = 3
+
+internal const val SYNC_AGENT_LABEL = "com.mahadi.claude-session-sync"
+
+/** launchd gives agents a bare PATH; the sync cycle shells out to git and (if present) gitleaks. */
+private const val SYNC_AGENT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 /** Must match `requires-python` in the bundled pyproject.toml. */
 private const val MIN_PYTHON_MAJOR = 3
@@ -165,6 +170,101 @@ object McpRuntime {
     }
 
     fun isRefreshAgentInstalled(): Boolean = agentFile.isFile
+
+    private val syncAgentFile: File
+        get() = File(System.getProperty("user.home"), "Library/LaunchAgents/$SYNC_AGENT_LABEL.plist")
+
+    /**
+     * Installs the twice-daily team sync agent (`claude-session-cache sync`).
+     *
+     * Every step of the sync cycle is idempotent, so it also runs once at load — a laptop
+     * that slept through both scheduled hours simply catches up at the next login.
+     */
+    fun installSyncAgent(hours: List<Int>): Pair<Boolean, String> {
+        if (!isMac) return false to "Scheduled team sync is macOS-only."
+
+        val home = System.getProperty("user.home")
+        return try {
+            File(home, ".claude-session-cache").mkdirs()
+            syncAgentFile.parentFile?.mkdirs()
+            syncAgentFile.writeText(syncAgentPlist(home, hours.ifEmpty { TeamSyncConfig.DEFAULT_SYNC_HOURS }))
+
+            exec(listOf("launchctl", "unload", syncAgentFile.absolutePath), installDir, timeoutSeconds = 20)
+            val loaded = exec(
+                listOf("launchctl", "load", "-w", syncAgentFile.absolutePath),
+                installDir,
+                timeoutSeconds = 20,
+            )
+            if (!loaded.first) {
+                LOG.warn("launchctl load failed for ${syncAgentFile.absolutePath}: ${loaded.second}")
+            }
+            loaded
+        } catch (throwable: Throwable) {
+            LOG.warn("Could not install the sync agent at ${syncAgentFile.absolutePath}", throwable)
+            false to (throwable.message ?: "Unknown error")
+        }
+    }
+
+    fun removeSyncAgent() {
+        if (!isMac || !syncAgentFile.isFile) return
+        exec(listOf("launchctl", "unload", syncAgentFile.absolutePath), installDir, timeoutSeconds = 20)
+        if (!syncAgentFile.delete()) LOG.warn("Could not delete ${syncAgentFile.absolutePath}")
+    }
+
+    fun isSyncAgentInstalled(): Boolean = syncAgentFile.isFile
+
+    /** Runs one sync cycle right now, for the settings dialog's "Sync now" feedback. */
+    fun runSync(): Pair<Boolean, String> =
+        exec(listOf(executable.absolutePath, "sync"), installDir, timeoutSeconds = SETUP_TIMEOUT_SECONDS)
+
+    private fun syncAgentPlist(home: String, hours: List<Int>): String {
+        val intervals = hours.joinToString("\n") { hour ->
+            """
+                <dict>
+                    <key>Hour</key>
+                    <integer>$hour</integer>
+                    <key>Minute</key>
+                    <integer>17</integer>
+                </dict>
+            """.trimEnd()
+        }
+        return """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>$SYNC_AGENT_LABEL</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>${executable.absolutePath}</string>
+                <string>sync</string>
+            </array>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>StartCalendarInterval</key>
+            <array>
+$intervals
+            </array>
+            <key>StandardOutPath</key>
+            <string>$home/.claude-session-cache/sync.log</string>
+            <key>StandardErrorPath</key>
+            <string>$home/.claude-session-cache/sync.error.log</string>
+            <key>EnvironmentVariables</key>
+            <dict>
+                <key>HOME</key>
+                <string>$home</string>
+                <key>PATH</key>
+                <string>$SYNC_AGENT_PATH</string>
+            </dict>
+            <key>Nice</key>
+            <integer>5</integer>
+            <key>ProcessType</key>
+            <string>Background</string>
+        </dict>
+        </plist>
+        """.trimIndent()
+    }
 
     private fun refreshAgentPlist(home: String): String =
         """

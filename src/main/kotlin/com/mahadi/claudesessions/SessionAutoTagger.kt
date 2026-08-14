@@ -3,6 +3,7 @@ package com.mahadi.claudesessions
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.mahadi.claudesessions.model.ClaudeSession
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 private val LOG = logger<SessionAutoTaggerService>()
@@ -10,6 +11,13 @@ private val LOG = logger<SessionAutoTaggerService>()
 private class SessionAutoTaggerService
 
 private const val SUGGEST_MODEL = "claude-haiku-4-5-20251001"
+
+/**
+ * What a real tag looks like. The CLI prints warnings ("no stdin data received…") that
+ * would otherwise be split on commas and saved as tags, so anything that is not a short
+ * lowercase word or hyphenation is dropped rather than trusted.
+ */
+private val TAG_SHAPE = Regex("^[a-z0-9][a-z0-9-]{0,29}$")
 
 /**
  * Suggests short tags for a session via a single, cheap one-shot call to the
@@ -42,8 +50,10 @@ object SessionAutoTagger {
 
     private fun runClaudePrint(prompt: String): List<String> {
         val binary = ClaudeBinaryLocator.resolve()
+        // stdin comes from /dev/null: an inherited open pipe makes the CLI wait 3s and
+        // print a "no stdin data received" warning that used to end up saved as tags.
         val builder = ProcessBuilder(binary, "-p", "--model", SUGGEST_MODEL, prompt)
-            .redirectErrorStream(true)
+            .redirectInput(File("/dev/null"))
         SessionMetadataStore.claudeConfigDir()?.let { builder.environment()["CLAUDE_CONFIG_DIR"] = it }
         val process = builder.start()
 
@@ -54,13 +64,15 @@ object SessionAutoTagger {
         }
 
         val output = process.inputStream.bufferedReader().readText().trim()
+        val errors = process.errorStream.bufferedReader().readText().trim()
         if (process.exitValue() != 0) {
-            throw IllegalStateException("claude -p exited ${process.exitValue()}: $output")
+            throw IllegalStateException("claude -p exited ${process.exitValue()}: ${errors.ifEmpty { output }}")
         }
 
-        return output.split(",")
+        val answerLine = output.lines().lastOrNull { it.isNotBlank() } ?: return emptyList()
+        return answerLine.split(",")
             .map { it.trim().trim('#').lowercase() }
-            .filter { it.isNotEmpty() }
+            .filter { TAG_SHAPE.matches(it) }
             .take(4)
     }
 }

@@ -5,7 +5,7 @@ left-hand tool window, grouped by project. Read a session's whole conversation a
 read-only transcript, resume it in a terminal tab, organise it with tags, see where your
 time actually went — and optionally let Claude search your own history.
 
-Current version: **1.1.19**. Built against IntelliJ IDEA Community 2025.2, compatible with
+Current version: **1.2.0**. Built against IntelliJ IDEA Community 2025.2, compatible with
 builds 242–299.\* (so it loads in PyCharm 2026.2, Community and Professional).
 
 ---
@@ -88,12 +88,33 @@ decide about X" from your own past work.
 See [`mcp-server/README.md`](mcp-server/README.md) for the tools it exposes, the CLI, and
 what gets indexed.
 
+### Optional: share sessions with your team
+
+**Settings → Team Sync** turns the personal cache into a team knowledge base: redacted
+session history syncs through a **private git repository** (one directory per person per
+project, so pushes can never conflict), and teammates' sessions are pulled back into your
+local search. Claude can then answer with `scope: team` — "what did anyone on the team
+decide about X", "who touched this file and why".
+
+- **Allowlisted projects only** — nothing is shared unless you name the project.
+- **Mark private** on any session keeps it out of the sync — and if it already synced,
+  a tombstone retracts it from teammates' caches on their next pull.
+- A scheduled job runs the full cycle (pull → import → export → push) twice a day and
+  catches up at login if the laptop was asleep. If `gitleaks` is installed, everything is
+  secret-scanned again before each push.
+- **Stats → Health** shows whether the background jobs, per-account MCP registrations and
+  supporting tools are actually working.
+
+Point the settings at the repo URL and local path, confirm your id (prefilled from
+`git config user.email`), list the projects to share, apply — cloning and scheduling
+happen on their own.
+
 ---
 
 ## Install
 
 1. PyCharm → **Settings → Plugins → ⚙ → Install Plugin from Disk…**
-2. Pick `build/distributions/claude-session-browser-1.1.19.zip`.
+2. Pick `build/distributions/claude-session-browser-1.2.0.zip`.
 3. **Restart** the IDE.
 4. Open the **Claude Sessions** tool window on the left edge.
 

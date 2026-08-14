@@ -36,6 +36,7 @@ internal object Ui {
     val ACCENT = JBColor(0x3B82F6, 0x3D7DD6)
     val GOOD = JBColor(0x0E9F6E, 0x35A382)
     val ATTENTION = JBColor(0xB45309, 0xBE8B1E)
+    val BAD = JBColor(0xC53030, 0xD45B5B)
 
     /**
      * Who is speaking in a transcript. Blue and green are an adjacent validated pair (worst-case

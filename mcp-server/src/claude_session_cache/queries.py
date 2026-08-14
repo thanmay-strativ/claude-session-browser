@@ -56,15 +56,24 @@ def _since_clause(since_days: int | None) -> tuple[str, list[object]]:
     return " AND COALESCE(s.last_activity_at, '') >= ? ", [cutoff]
 
 
-def _account_clause(all_accounts: bool) -> tuple[str, list[object]]:
-    """Restrict results to the Claude account the plugin currently has selected.
+def _scope_clause(scope: str | None, all_accounts: bool) -> tuple[str, list[object]]:
+    """Restrict results along two independent axes: whose sessions, and which account.
 
-    The cache holds every account that has ever been ingested, so without this a query
-    would answer from a different account's history than the one the user is looking at.
+    `scope` picks the person: "mine" (default) is this machine's own sessions, "team"
+    adds every imported teammate, and any other value names one teammate. `all_accounts`
+    stays what it always was — which of *my own* Claude accounts — and only applies to
+    my own rows, because imported rows never belong to a local account.
     """
-    if all_accounts:
-        return "", []
-    return " AND s.source_root = ? ", [str(active_session_root())]
+    normalized = (scope or "mine").strip().lower()
+    if normalized == "mine":
+        if all_accounts:
+            return " AND s.owner IS NULL ", []
+        return " AND s.owner IS NULL AND s.source_root = ? ", [str(active_session_root())]
+    if normalized == "team":
+        if all_accounts:
+            return "", []
+        return " AND (s.owner IS NOT NULL OR s.source_root = ?) ", [str(active_session_root())]
+    return " AND s.owner = ? ", [(scope or "").strip()]
 
 
 def _filter_clause(
@@ -73,8 +82,9 @@ def _filter_clause(
     branch: str | None,
     include_subagents: bool,
     all_accounts: bool = False,
+    scope: str | None = None,
 ) -> tuple[str, list[object]]:
-    clause, params = _account_clause(all_accounts)
+    clause, params = _scope_clause(scope, all_accounts)
 
     if project:
         clause += " AND (s.project_name = ? OR s.project_path LIKE ?) "
@@ -103,6 +113,7 @@ def search_messages(
     include_subagents: bool = False,
     limit: int = DEFAULT_LIMIT,
     all_accounts: bool = False,
+    scope: str | None = None,
 ) -> tuple[list[dict], str]:
     """Full-text search across message bodies, returning ranked snippets and the match mode.
 
@@ -111,7 +122,7 @@ def search_messages(
     dead-end at zero results for exactly the questions this cache exists to answer.
     """
     bounded_limit = max(1, min(limit, MAX_LIMIT))
-    filter_sql, filter_params = _filter_clause(project, tag, branch, include_subagents, all_accounts)
+    filter_sql, filter_params = _filter_clause(project, tag, branch, include_subagents, all_accounts, scope)
     since_sql, since_params = _since_clause(since_days)
 
     role_sql = ""
@@ -132,6 +143,7 @@ def search_messages(
             COALESCE(s.custom_title, s.title) AS title,
             s.project_name,
             s.git_branch,
+            s.owner,
             s.last_activity_at,
             s.is_subagent
         FROM messages_fts
@@ -168,16 +180,17 @@ def list_sessions(
     include_subagents: bool = False,
     limit: int = DEFAULT_LIMIT,
     all_accounts: bool = False,
+    scope: str | None = None,
 ) -> list[dict]:
     """List sessions newest-first, with their tags and commit count."""
     bounded_limit = max(1, min(limit, MAX_LIMIT))
-    filter_sql, filter_params = _filter_clause(project, tag, branch, include_subagents, all_accounts)
+    filter_sql, filter_params = _filter_clause(project, tag, branch, include_subagents, all_accounts, scope)
     since_sql, since_params = _since_clause(since_days)
 
     sql = f"""
         SELECT
             s.session_id, COALESCE(s.custom_title, s.title) AS title, s.project_name, s.project_path, s.git_branch,
-            s.model, s.message_count, s.started_at, s.last_activity_at, s.is_subagent,
+            s.owner, s.model, s.message_count, s.started_at, s.last_activity_at, s.is_subagent,
             (SELECT GROUP_CONCAT(t.tag, ',') FROM session_tags t WHERE t.session_id = s.session_id) AS tags,
             (SELECT COUNT(*) FROM session_commits c WHERE c.session_id = s.session_id) AS commit_count
         FROM sessions s
@@ -260,15 +273,17 @@ def sessions_touching_file(
     path_fragment: str,
     limit: int = DEFAULT_LIMIT,
     all_accounts: bool = False,
+    scope: str | None = None,
 ) -> list[dict]:
     """Find sessions that read or edited a file whose path contains `path_fragment`."""
     if not path_fragment:
         return []
     bounded_limit = max(1, min(limit, MAX_LIMIT))
-    account_sql, account_params = _account_clause(all_accounts)
+    account_sql, account_params = _scope_clause(scope, all_accounts)
     sql = f"""
         SELECT
-            s.session_id, COALESCE(s.custom_title, s.title) AS title, s.project_name, s.git_branch, s.last_activity_at,
+            s.session_id, COALESCE(s.custom_title, s.title) AS title, s.project_name, s.git_branch,
+            s.owner, s.last_activity_at,
             GROUP_CONCAT(DISTINCT f.file_path) AS matched_files
         FROM files_touched f
         JOIN sessions s ON s.session_id = f.session_id
@@ -289,10 +304,11 @@ def find_commits(
     branch: str | None = None,
     limit: int = DEFAULT_LIMIT,
     all_accounts: bool = False,
+    scope: str | None = None,
 ) -> list[dict]:
     """Look up commits recorded in sessions, by SHA prefix and/or branch."""
     bounded_limit = max(1, min(limit, MAX_LIMIT))
-    clause, params = _account_clause(all_accounts)
+    clause, params = _scope_clause(scope, all_accounts)
     if commit_sha:
         clause += " AND c.commit_sha LIKE ? "
         params.append(f"{commit_sha}%")
@@ -302,7 +318,7 @@ def find_commits(
 
     sql = f"""
         SELECT c.commit_sha, c.branch, c.subject, c.session_id,
-               COALESCE(s.custom_title, s.title) AS title, s.project_name, s.last_activity_at
+               COALESCE(s.custom_title, s.title) AS title, s.project_name, s.owner, s.last_activity_at
         FROM session_commits c
         JOIN sessions s ON s.session_id = c.session_id
         WHERE 1=1 {clause}
@@ -336,15 +352,14 @@ def cache_stats(connection: sqlite3.Connection, all_accounts: bool = False) -> d
     `accounts` breakdown stays global so a second account is still discoverable.
     """
     account_root = None if all_accounts else str(active_session_root())
-    session_clause = "" if account_root is None else " AND s.source_root = ? "
+    session_clause = " AND s.owner IS NULL " + ("" if account_root is None else " AND s.source_root = ? ")
     params: list[object] = [] if account_root is None else [account_root]
 
     def child_clause(alias: str) -> str:
-        if account_root is None:
-            return ""
+        root_clause = "" if account_root is None else "AND s.source_root = ? "
         return (
             f" AND EXISTS (SELECT 1 FROM sessions s WHERE s.session_id = {alias}.session_id "
-            "AND s.source_root = ?) "
+            f"AND s.owner IS NULL {root_clause}) "
         )
 
     def scalar(sql: str) -> int:
@@ -408,13 +423,26 @@ def cache_stats(connection: sqlite3.Connection, all_accounts: bool = False) -> d
         {"root": row["root"], "sessions": row["session_count"]}
         for row in connection.execute(
             "SELECT COALESCE(source_root, '(unattributed)') AS root, COUNT(*) AS session_count "
-            "FROM sessions GROUP BY source_root ORDER BY session_count DESC"
+            "FROM sessions WHERE owner IS NULL GROUP BY source_root ORDER BY session_count DESC"
+        ).fetchall()
+    ]
+    team = [
+        {
+            "owner": row["owner"],
+            "sessions": row["session_count"],
+            "newest_activity": row["newest_activity"],
+        }
+        for row in connection.execute(
+            "SELECT owner, COUNT(*) AS session_count, MAX(last_activity_at) AS newest_activity "
+            "FROM sessions WHERE owner IS NOT NULL "
+            "GROUP BY owner ORDER BY newest_activity DESC"
         ).fetchall()
     ]
 
     return {
         "active_account_root": account_root,
         "accounts": accounts,
+        "team": team,
         "sessions": scalar(f"SELECT COUNT(*) FROM sessions s WHERE 1=1 {session_clause}"),
         "primary_sessions": scalar(
             f"SELECT COUNT(*) FROM sessions s WHERE s.is_subagent = 0 {session_clause}"

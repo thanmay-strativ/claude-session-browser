@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.mahadi"
-version = "1.1.19"
+version = "1.2.0"
 
 repositories {
     mavenCentral()

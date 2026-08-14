@@ -7,10 +7,12 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTabbedPane
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.mahadi.claudesessions.CacheStatsService
+import com.mahadi.claudesessions.HealthCheckService
 import com.mahadi.claudesessions.McpRegistrationService
 import com.mahadi.claudesessions.SessionMetadataStore
 import com.mahadi.claudesessions.SessionTags
@@ -63,7 +65,103 @@ class StatsDialog(
         init()
     }
 
-    override fun createCenterPanel(): JComponent = StatsPanel(sessions)
+    override fun createCenterPanel(): JComponent = JBTabbedPane().apply {
+        addTab("Stats", StatsPanel(sessions))
+        addTab("Health", HealthPanel())
+    }
+}
+
+/**
+ * Live status of everything the plugin set up in the background: the scheduled launchd
+ * jobs, the per-account MCP registrations, and the tools the sync cycle leans on.
+ * Exists so "is it actually working?" has an answer inside the IDE instead of in
+ * launchctl and log files.
+ */
+private class HealthPanel : JBPanel<HealthPanel>(BorderLayout()) {
+
+    private val jobsSection = section("Background jobs").apply { add(Ui.mutedRow("Checking…")) }
+    private val toolsSection = section("Tools & integrations").apply { add(Ui.mutedRow("Checking…")) }
+
+    init {
+        preferredSize = Dimension(JBUI.scale(520), JBUI.scale(660))
+        background = UIUtil.getPanelBackground()
+
+        val content = JBPanel<JBPanel<*>>().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = UIUtil.getPanelBackground()
+            border = JBUI.Borders.empty(4, 14, 14, 14)
+            add(jobsSection)
+            add(toolsSection)
+        }
+
+        add(
+            JBScrollPane(content).apply {
+                border = JBUI.Borders.empty()
+                verticalScrollBar.unitIncrement = JBUI.scale(16)
+            },
+            BorderLayout.CENTER,
+        )
+
+        loadAsync()
+    }
+
+    private fun loadAsync() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val report = HealthCheckService.load()
+            ApplicationManager.getApplication().invokeLater(
+                {
+                    populate(jobsSection, "Background jobs", report.jobs)
+                    populate(toolsSection, "Tools & integrations", report.tools)
+                },
+                ModalityState.any(),
+            )
+        }
+    }
+
+    private fun populate(target: JBPanel<*>, title: String, checks: List<HealthCheckService.Check>) {
+        target.removeAll()
+        target.add(Ui.sectionTitle(title))
+        checks.forEach { check -> target.add(checkCard(check)) }
+        target.revalidate()
+        target.repaint()
+    }
+
+    private fun checkCard(check: HealthCheckService.Check): JComponent {
+        val heading = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
+            isOpaque = false
+            alignmentX = LEFT_ALIGNMENT
+            add(JBLabel(check.label).apply { font = JBFont.label().asBold() })
+            add(Chip(stateWord(check.state), stateColor(check.state)))
+        }
+        val body = JBPanel<JBPanel<*>>().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            add(heading.apply { maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height) })
+            add(Ui.mutedRow(check.detail))
+        }
+        return Card().apply { add(body, BorderLayout.CENTER) }
+    }
+
+    private fun stateWord(state: HealthCheckService.State): String = when (state) {
+        HealthCheckService.State.OK -> "working"
+        HealthCheckService.State.WARNING -> "attention"
+        HealthCheckService.State.PROBLEM -> "not working"
+        HealthCheckService.State.OFF -> "off"
+    }
+
+    private fun stateColor(state: HealthCheckService.State): Color = when (state) {
+        HealthCheckService.State.OK -> Ui.GOOD
+        HealthCheckService.State.WARNING -> Ui.ATTENTION
+        HealthCheckService.State.PROBLEM -> Ui.BAD
+        HealthCheckService.State.OFF -> Ui.inkMuted
+    }
+
+    private fun section(title: String): JBPanel<JBPanel<*>> = JBPanel<JBPanel<*>>().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        isOpaque = false
+        alignmentX = LEFT_ALIGNMENT
+        add(Ui.sectionTitle(title))
+    }
 }
 
 private class StatsPanel(private val sessions: List<ClaudeSession>) : JBPanel<StatsPanel>(BorderLayout()) {

@@ -299,18 +299,26 @@ def _sync_user_metadata(connection: sqlite3.Connection, user_metadata: dict[str,
     This runs on every ingest regardless of transcript watermarks, because the user can
     retag or rename a session without its transcript changing. `custom_title` is kept
     separate from the transcript's own title so clearing the override restores it.
+
+    Only locally-owned rows (`owner IS NULL`) are rebuilt: imported teammates' titles
+    and tags come from their exports, and rebuilding from the local sidecar would
+    silently erase them on every ingest.
     """
-    connection.execute("UPDATE sessions SET custom_title = NULL")
+    connection.execute("UPDATE sessions SET custom_title = NULL WHERE owner IS NULL")
     for session_id, metadata in user_metadata.items():
         if metadata.title:
             connection.execute(
-                "UPDATE sessions SET custom_title = ? WHERE session_id = ?",
+                "UPDATE sessions SET custom_title = ? WHERE session_id = ? AND owner IS NULL",
                 (metadata.title, session_id),
             )
 
-    connection.execute("DELETE FROM session_tags")
+    connection.execute(
+        "DELETE FROM session_tags WHERE session_id IN (SELECT session_id FROM sessions WHERE owner IS NULL)"
+    )
 
-    rows = connection.execute("SELECT session_id, is_subagent, git_branch FROM sessions").fetchall()
+    rows = connection.execute(
+        "SELECT session_id, is_subagent, git_branch FROM sessions WHERE owner IS NULL"
+    ).fetchall()
     committed = {
         row["session_id"]
         for row in connection.execute("SELECT DISTINCT session_id FROM session_commits").fetchall()

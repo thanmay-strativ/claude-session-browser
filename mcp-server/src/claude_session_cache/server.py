@@ -19,16 +19,25 @@ from .ingest import ingest
 
 INSTRUCTIONS = """
 Searchable archive of this user's past Claude Code sessions (their own prior
-conversations, across every project on this machine).
+conversations, across every project on this machine), plus any teammates' sessions
+imported through the team knowledge-base sync.
 
 Use it when the user refers to earlier work — "what did we decide about X", "I fixed
 this before", "which session touched this file", "what was I doing on that branch".
+Pass scope="team" when the question is about what anyone on the team did, or a
+teammate's id to search one person; results carry an `owner` field (null = the user's
+own session).
 
 Start with search_sessions to locate candidates, then get_session for the detail of a
 specific one. Sessions carry auto tags: branch:<name>, the ticket id parsed from the
 branch, committed (the session produced a git commit), subagent, and pinned — plus any
 tags the user set by hand.
 """.strip()
+
+SCOPE_DESCRIPTION = (
+    "scope: 'mine' (default) = this user's own sessions, 'team' = own plus every "
+    "imported teammate, or a teammate's id/email for one person."
+)
 
 app: FastMCP = FastMCP(name="claude-session-cache", instructions=INSTRUCTIONS)
 
@@ -55,7 +64,8 @@ def _db() -> sqlite3.Connection:
         "Full-text search across the bodies of past Claude Code sessions. Returns ranked "
         "snippets with the session id, title, project and branch. Use this first to find "
         "relevant past work, then call get_session for detail. Searches the Claude account "
-        "the user currently has selected; pass all_accounts=true to search every account."
+        "the user currently has selected; pass all_accounts=true to search every account. "
+        + SCOPE_DESCRIPTION
     ),
 )
 def search_sessions(
@@ -68,6 +78,7 @@ def search_sessions(
     include_subagents: bool = False,
     limit: int = 20,
     all_accounts: bool = False,
+    scope: str | None = None,
 ) -> dict[str, Any]:
     results, match_mode = queries.search_messages(
         _db(),
@@ -80,6 +91,7 @@ def search_sessions(
         include_subagents=include_subagents,
         limit=limit,
         all_accounts=all_accounts,
+        scope=scope,
     )
     return {
         "query": query,
@@ -95,7 +107,8 @@ def search_sessions(
         "List past sessions newest-first with their tags and commit counts. Filter by "
         "project, tag (e.g. 'committed', 'vay-4499', 'branch:development'), branch, or age "
         "in days. Use when browsing rather than searching for specific text. Lists the "
-        "account the user currently has selected; pass all_accounts=true for every account."
+        "account the user currently has selected; pass all_accounts=true for every account. "
+        + SCOPE_DESCRIPTION
     ),
 )
 def list_sessions(
@@ -106,6 +119,7 @@ def list_sessions(
     include_subagents: bool = False,
     limit: int = 20,
     all_accounts: bool = False,
+    scope: str | None = None,
 ) -> dict[str, Any]:
     results = queries.list_sessions(
         _db(),
@@ -116,6 +130,7 @@ def list_sessions(
         include_subagents=include_subagents,
         limit=limit,
         all_accounts=all_accounts,
+        scope=scope,
     )
     return {"count": len(results), "sessions": results}
 
@@ -143,20 +158,23 @@ def get_session(
     name="sessions_touching_file",
     description=(
         "Find past sessions that read or edited a file whose path contains the given "
-        "fragment. Use for 'have I worked on this file before' and to recover the reasoning "
-        "behind an earlier change."
+        "fragment. Use for 'have I worked on this file before', 'who on the team touched "
+        "this file' (scope='team'), and to recover the reasoning behind an earlier change. "
+        + SCOPE_DESCRIPTION
     ),
 )
 def sessions_touching_file(
     path_fragment: str,
     limit: int = 20,
     all_accounts: bool = False,
+    scope: str | None = None,
 ) -> dict[str, Any]:
     results = queries.sessions_touching_file(
         _db(),
         path_fragment=path_fragment,
         limit=limit,
         all_accounts=all_accounts,
+        scope=scope,
     )
     return {"path_fragment": path_fragment, "count": len(results), "sessions": results}
 
@@ -166,7 +184,7 @@ def sessions_touching_file(
     description=(
         "Look up git commits that were made during past sessions, by SHA prefix and/or "
         "branch. Answers 'which session produced this commit' and 'what was committed on "
-        "this branch'."
+        "this branch'. " + SCOPE_DESCRIPTION
     ),
 )
 def find_commits(
@@ -174,6 +192,7 @@ def find_commits(
     branch: str | None = None,
     limit: int = 20,
     all_accounts: bool = False,
+    scope: str | None = None,
 ) -> dict[str, Any]:
     results = queries.find_commits(
         _db(),
@@ -181,6 +200,7 @@ def find_commits(
         branch=branch,
         limit=limit,
         all_accounts=all_accounts,
+        scope=scope,
     )
     return {"count": len(results), "commits": results}
 
@@ -190,7 +210,9 @@ def find_commits(
     description=(
         "Summarise the session cache: totals, date range, top tags, per-project counts and "
         "top branches. Useful for orienting before a search. Counts cover the selected "
-        "Claude account; the 'accounts' list shows every account held in the cache."
+        "Claude account; the 'accounts' list shows every account held in the cache, and "
+        "the 'team' list shows each imported teammate with their newest activity (sync "
+        "staleness)."
     ),
 )
 def cache_stats(all_accounts: bool = False) -> dict[str, Any]:

@@ -21,22 +21,89 @@ private const val REGISTRATION_SCOPE = "user"
  * registration. Claude Code reads this config at startup, so a running session keeps the
  * previous state until it restarts.
  *
- * Registration is per account: every call carries the active environment's
- * `CLAUDE_CONFIG_DIR`, so ticking MCP while on a second account registers with that
- * account rather than silently with the default one.
+ * Registration covers every configured environment, not just the active one: user scope
+ * lives in each account's own `.claude.json`, so registering only under the account that
+ * happened to be selected left every other account without session search.
  */
 object McpRegistrationService {
 
     data class Result(val success: Boolean, val output: String)
 
     /**
-     * Reads user-scope registration straight out of the active account's `.claude.json`.
+     * True only when every configured account has the server in its `.claude.json`.
      *
-     * `claude mcp get` would also answer this, but it health-checks by spawning the server
-     * (~1.8s), which is far too slow for painting UI state.
+     * Read straight from the files: `claude mcp get` would also answer this, but it
+     * health-checks by spawning the server (~1.8s), which is far too slow for painting
+     * UI state — and it would only answer for one account anyway.
      */
-    fun isRegistered(): Boolean {
-        val config = configFile()
+    fun isRegistered(): Boolean = configDirs().all { isRegisteredFor(it) }
+
+    fun register(): Result {
+        if (!McpRuntime.isInstalled()) {
+            return Result(false, "The session cache is not installed yet.")
+        }
+        return forEachAccount { configDir ->
+            if (isRegisteredFor(configDir)) {
+                Result(true, "already registered")
+            } else {
+                run(
+                    listOf(
+                        "mcp", "add", "-s", REGISTRATION_SCOPE, SERVER_NAME,
+                        "--", McpRuntime.executable.absolutePath, "serve",
+                    ),
+                    configDir,
+                )
+            }
+        }
+    }
+
+    fun unregister(): Result = forEachAccount { configDir ->
+        if (isRegisteredFor(configDir)) {
+            run(listOf("mcp", "remove", SERVER_NAME, "-s", REGISTRATION_SCOPE), configDir)
+        } else {
+            Result(true, "not registered")
+        }
+    }
+
+    data class AccountRegistration(val environmentName: String, val registered: Boolean)
+
+    /** Per-environment registration state, for the health view. */
+    fun registrationByAccount(): List<AccountRegistration> =
+        SessionMetadataStore.environments().map { environment ->
+            val configDir = environment.configDir
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() && it != SessionMetadataStore.defaultConfigDir() }
+            AccountRegistration(environment.name, isRegisteredFor(configDir))
+        }
+
+    /** Every distinct account config directory; null stands for the default `~/.claude`. */
+    private fun configDirs(): List<String?> =
+        SessionMetadataStore.environments()
+            .map { environment ->
+                environment.configDir
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() && it != SessionMetadataStore.defaultConfigDir() }
+            }
+            .distinct()
+            .ifEmpty { listOf(null) }
+
+    private fun forEachAccount(action: (String?) -> Result): Result {
+        val failures = mutableListOf<String>()
+        for (configDir in configDirs()) {
+            val result = action(configDir)
+            if (!result.success) {
+                failures += "${configDir ?: "default account"}: ${result.output}"
+            }
+        }
+        return if (failures.isEmpty()) {
+            Result(true, "")
+        } else {
+            Result(false, failures.joinToString("\n"))
+        }
+    }
+
+    private fun isRegisteredFor(configDir: String?): Boolean {
+        val config = configFile(configDir)
         if (!config.isFile) return false
         return try {
             JsonParser.parseString(config.readText())
@@ -49,32 +116,11 @@ object McpRegistrationService {
         }
     }
 
-    fun register(): Result {
-        if (!McpRuntime.isInstalled()) {
-            return Result(false, "The session cache is not installed yet.")
-        }
-        return run(
-            listOf(
-                "mcp",
-                "add",
-                "-s",
-                REGISTRATION_SCOPE,
-                SERVER_NAME,
-                "--",
-                McpRuntime.executable.absolutePath,
-                "serve",
-            )
-        )
-    }
-
-    fun unregister(): Result = run(listOf("mcp", "remove", SERVER_NAME, "-s", REGISTRATION_SCOPE))
-
     /**
-     * Where the active account keeps its MCP registrations: `$CLAUDE_CONFIG_DIR/.claude.json`
+     * Where an account keeps its MCP registrations: `$CLAUDE_CONFIG_DIR/.claude.json`
      * for a second account, `~/.claude.json` for the default one.
      */
-    private fun configFile(): File {
-        val configDir = SessionMetadataStore.claudeConfigDir()
+    private fun configFile(configDir: String?): File {
         return if (configDir != null) {
             File(configDir, ".claude.json")
         } else {
@@ -82,13 +128,11 @@ object McpRegistrationService {
         }
     }
 
-    private fun run(arguments: List<String>): Result {
+    private fun run(arguments: List<String>, configDir: String?): Result {
         val binary = ClaudeBinaryLocator.resolve()
         return try {
             val builder = ProcessBuilder(listOf(binary) + arguments).redirectErrorStream(true)
-            SessionMetadataStore.claudeConfigDir()?.let {
-                builder.environment()["CLAUDE_CONFIG_DIR"] = it
-            }
+            configDir?.let { builder.environment()["CLAUDE_CONFIG_DIR"] = it }
             val process = builder.start()
             if (!process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 process.destroyForcibly()

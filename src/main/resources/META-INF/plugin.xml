@@ -33,10 +33,26 @@
                 Claude Code so it can search your past work. One tick sets it up, indexes
                 your history and schedules a daily refresh; searches stay scoped to the
                 account you have selected.</li>
+            <li><b>Team sync</b> — optionally share redacted session history with your team
+                through a private git repository and pull theirs back, so Claude can answer
+                "what did anyone on the team decide about X". Allowlisted projects only,
+                a per-session <b>Mark private</b> that also retracts already-synced sessions,
+                and a scheduled twice-daily cycle. A <b>Health</b> tab in Stats shows whether
+                the background jobs, MCP registrations and tools are actually working.</li>
         </ul>
     ]]></description>
 
     <change-notes><![CDATA[
+        <h4>1.2.0</h4>
+        <ul>
+            <li>Team sync: share redacted sessions with your team through a private git repo</li>
+            <li>Claude can search the whole team's history (scope: mine / team / one person)</li>
+            <li>Mark private is enforced — and retracts a session even after it synced</li>
+            <li>Settings split into tabs; team sync fully configurable there</li>
+            <li>Health tab in Stats: background jobs, MCP per account, tools</li>
+            <li>MCP registration now covers every account, not just the active one</li>
+            <li>Tag suggestions no longer save CLI warnings as tags</li>
+        </ul>
         <h4>1.1.19</h4>
         <ul>
             <li>Branch always shown on a row</li>
