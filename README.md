@@ -96,17 +96,27 @@ project, so pushes can never conflict), and teammates' sessions are pulled back 
 local search. Claude can then answer with `scope: team` — "what did anyone on the team
 decide about X", "who touched this file and why".
 
-- **Allowlisted projects only** — nothing is shared unless you name the project.
-- **Mark private** on any session keeps it out of the sync — and if it already synced,
-  a tombstone retracts it from teammates' caches on their next pull.
-- A scheduled job runs the full cycle (pull → import → export → push) twice a day and
-  catches up at login if the laptop was asleep. If `gitleaks` is installed, everything is
-  secret-scanned again before each push.
+- **Allowlisted projects only** — tick the projects to share; nothing else leaves the machine.
+- **Share with team** sits on every session's context menu, ticked by default. Untick one to
+  hold it back — and if it already synced, a tombstone retracts it from teammates' caches on
+  their next pull.
+- **Filters**: skip sessions under N messages (3 by default — throwaways carry no decision)
+  and optionally anything older than N days. Tightening a filter retracts what a looser one
+  already shared.
+- **Pause sharing** with one click in the panel: your sessions stop being published, the
+  team's keep arriving.
+- **Your own redaction patterns** on top of the built-in ones, plus a notification when a
+  scheduled sync fails.
+- **Choose what Claude searches by default** — just your sessions, or the whole team's.
+- A **status strip** under the toolbar shows the last run, what moved, and the countdown to
+  the next one. A scheduled job runs the full cycle (pull → import → export → push) twice a
+  day and catches up at login if the laptop was asleep. If `gitleaks` is installed,
+  everything is secret-scanned again before each push.
 - **Stats → Health** shows whether the background jobs, per-account MCP registrations and
   supporting tools are actually working.
 
 Point the settings at the repo URL and local path, confirm your id (prefilled from
-`git config user.email`), list the projects to share, apply — cloning and scheduling
+`git config user.email`), tick the projects to share, apply — cloning and scheduling
 happen on their own.
 
 ---

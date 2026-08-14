@@ -79,6 +79,11 @@ class StatsDialog(
  */
 private class HealthPanel : JBPanel<HealthPanel>(BorderLayout()) {
 
+    private val summaryRow = JBPanel<JBPanel<*>>(GridLayout(1, 3, JBUI.scale(8), 0)).apply {
+        isOpaque = false
+        alignmentX = LEFT_ALIGNMENT
+        maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(56))
+    }
     private val jobsSection = section("Background jobs").apply { add(Ui.mutedRow("Checking…")) }
     private val toolsSection = section("Tools & integrations").apply { add(Ui.mutedRow("Checking…")) }
 
@@ -90,6 +95,8 @@ private class HealthPanel : JBPanel<HealthPanel>(BorderLayout()) {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             background = UIUtil.getPanelBackground()
             border = JBUI.Borders.empty(4, 14, 14, 14)
+            add(Ui.sectionTitle("Overview"))
+            add(summaryRow)
             add(jobsSection)
             add(toolsSection)
         }
@@ -110,12 +117,27 @@ private class HealthPanel : JBPanel<HealthPanel>(BorderLayout()) {
             val report = HealthCheckService.load()
             ApplicationManager.getApplication().invokeLater(
                 {
+                    populateSummary(report.jobs + report.tools)
                     populate(jobsSection, "Background jobs", report.jobs)
                     populate(toolsSection, "Tools & integrations", report.tools)
                 },
                 ModalityState.any(),
             )
         }
+    }
+
+    /** Counts first: how many checks are fine, need a look, or are broken. */
+    private fun populateSummary(checks: List<HealthCheckService.Check>) {
+        val working = checks.count { it.state == HealthCheckService.State.OK }
+        val attention = checks.count { it.state == HealthCheckService.State.WARNING }
+        val broken = checks.count { it.state == HealthCheckService.State.PROBLEM }
+
+        summaryRow.removeAll()
+        summaryRow.add(StatTile(working.toString(), "Working", Ui.GOOD))
+        summaryRow.add(StatTile(attention.toString(), "Needs a look", Ui.ATTENTION))
+        summaryRow.add(StatTile(broken.toString(), "Not working", if (broken > 0) Ui.BAD else Ui.inkMuted))
+        summaryRow.revalidate()
+        summaryRow.repaint()
     }
 
     private fun populate(target: JBPanel<*>, title: String, checks: List<HealthCheckService.Check>) {
@@ -126,20 +148,46 @@ private class HealthPanel : JBPanel<HealthPanel>(BorderLayout()) {
         target.repaint()
     }
 
+    /**
+     * Each check is a card carrying its state twice over — as a coloured rail down the
+     * edge and as a word in the chip — so the row is readable at a glance and still
+     * legible to anyone who cannot separate the hues.
+     */
     private fun checkCard(check: HealthCheckService.Check): JComponent {
-        val heading = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
+        val tone = stateColor(check.state)
+        val heading = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             isOpaque = false
             alignmentX = LEFT_ALIGNMENT
-            add(JBLabel(check.label).apply { font = JBFont.label().asBold() })
-            add(Chip(stateWord(check.state), stateColor(check.state)))
+            add(
+                JBLabel(check.label).apply { font = JBFont.label().asBold() },
+                BorderLayout.WEST,
+            )
+            add(
+                JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                    isOpaque = false
+                    add(Chip(stateWord(check.state), tone))
+                },
+                BorderLayout.EAST,
+            )
+            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
         }
         val body = JBPanel<JBPanel<*>>().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
-            add(heading.apply { maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height) })
-            add(Ui.mutedRow(check.detail))
+            add(heading)
+            add(
+                JBLabel("<html><body style='width: ${JBUI.scale(400)}px'>${check.detail}</body></html>").apply {
+                    foreground = Ui.inkMuted
+                    font = JBFont.small()
+                    alignmentX = LEFT_ALIGNMENT
+                    border = JBUI.Borders.emptyTop(3)
+                }
+            )
         }
-        return Card().apply { add(body, BorderLayout.CENTER) }
+        return Card(rail = tone).apply {
+            border = JBUI.Borders.empty(9, 14)
+            add(body, BorderLayout.CENTER)
+        }
     }
 
     private fun stateWord(state: HealthCheckService.State): String = when (state) {

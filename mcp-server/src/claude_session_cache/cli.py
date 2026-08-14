@@ -94,7 +94,15 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "export":
             projects = args.project or config.projects
-            stats = export_sessions(connection, repo_path, owner, projects)
+            stats = export_sessions(
+                connection,
+                repo_path,
+                owner,
+                projects,
+                min_messages=config.min_messages,
+                max_age_days=config.max_age_days,
+                extra_redaction_patterns=config.extra_redaction_patterns,
+            )
         else:
             stats = import_sessions(connection, repo_path, owner)
         connection.commit()

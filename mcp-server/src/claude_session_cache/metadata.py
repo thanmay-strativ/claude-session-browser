@@ -35,10 +35,15 @@ class TeamSyncConfig:
     """Team knowledge-base settings, written by the plugin's settings dialog."""
 
     enabled: bool = False
+    paused: bool = False
     repo_path: Path | None = None
     repo_url: str | None = None
     owner: str | None = None
     projects: list[str] = field(default_factory=list)
+    default_scope: str = "mine"
+    min_messages: int = 0
+    max_age_days: int = 0
+    extra_redaction_patterns: list[str] = field(default_factory=list)
 
     def is_usable(self) -> bool:
         return self.enabled and self.repo_path is not None and bool(self.owner)
@@ -116,12 +121,30 @@ def load_team_sync(path: Path | None = None) -> TeamSyncConfig:
     repo_url = raw.get("repoUrl")
     owner = raw.get("owner")
     projects = raw.get("projects")
+    default_scope = raw.get("defaultScope")
+    extra_patterns = raw.get("extraRedactionPatterns")
     return TeamSyncConfig(
         enabled=bool(raw.get("enabled", False)),
+        paused=bool(raw.get("paused", False)),
         repo_path=Path(repo_path.strip()).expanduser() if isinstance(repo_path, str) and repo_path.strip() else None,
         repo_url=repo_url.strip() if isinstance(repo_url, str) and repo_url.strip() else None,
         owner=owner.strip() if isinstance(owner, str) and owner.strip() else None,
         projects=[name.strip() for name in projects if isinstance(name, str) and name.strip()]
         if isinstance(projects, list)
         else [],
+        default_scope="team" if isinstance(default_scope, str) and default_scope.strip().lower() == "team" else "mine",
+        min_messages=_positive_int(raw.get("minMessages")),
+        max_age_days=_positive_int(raw.get("maxAgeDays")),
+        extra_redaction_patterns=[
+            pattern.strip() for pattern in extra_patterns if isinstance(pattern, str) and pattern.strip()
+        ]
+        if isinstance(extra_patterns, list)
+        else [],
     )
+
+
+def _positive_int(value: object) -> int:
+    """Zero means 'no limit' for every numeric sync setting, including a malformed one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return max(0, int(value))

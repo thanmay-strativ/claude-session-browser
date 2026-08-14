@@ -1,7 +1,5 @@
 package com.mahadi.claudesessions
 
-import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.logger
 import java.io.File
 import java.time.Duration
@@ -83,35 +81,41 @@ object HealthCheckService {
 
     /** The sync engine writes `sync-status.json` after every cycle; that file is the truth. */
     private fun lastSyncOutcome(config: TeamSyncConfig): Check {
-        val hours = config.syncHours.joinToString(", ") { String.format("%02d:17", it) }
+        val hours = config.syncHours.joinToString(", ") { String.format("%02d:%02d", it, SYNC_MINUTE) }
+        val nextRun = TeamSyncStatusService.untilNextRun(config.syncHours)?.let { " · next $it" }.orEmpty()
         val statusFile = cacheFile("sync-status.json")
         if (!statusFile.isFile) {
-            return Check("Team sync", State.WARNING, "Scheduled at $hours; it has not run yet.")
+            return Check("Team sync", State.WARNING, "Scheduled at $hours$nextRun; it has not run yet.")
         }
 
-        val status = readSyncStatus(statusFile)
+        val status = TeamSyncStatusService.load()
             ?: return Check(
                 "Team sync",
                 State.WARNING,
-                "Scheduled at $hours; the last status file could not be read.",
+                "Scheduled at $hours$nextRun; the last status file could not be read.",
             )
 
-        val failed = status.steps.firstOrNull { !it.ok }
-        val ranAgo = lastActivitySuffix(statusFile).ifEmpty { "" }
-        return if (failed == null) {
-            Check(
-                "Team sync",
-                State.OK,
-                "Runs at $hours$ranAgo — last cycle: ${status.exported} exported, " +
-                    "${status.imported} imported, ${status.deleted} retracted.",
-            )
-        } else {
-            Check(
+        val ranAgo = lastActivitySuffix(statusFile)
+        if (!status.ok) {
+            return Check(
                 "Team sync",
                 State.PROBLEM,
-                "Last cycle$ranAgo failed at '${failed.step}': ${failed.detail.take(160)}",
+                "Last cycle$ranAgo failed at '${status.failedStep}': ${status.failedDetail.orEmpty().take(160)}",
             )
         }
+        if (config.paused) {
+            return Check(
+                "Team sync",
+                State.WARNING,
+                "Sharing is paused — teammates' sessions still arrive, yours are not published. " +
+                    "Runs at $hours$nextRun$ranAgo.",
+            )
+        }
+        return Check(
+            "Team sync",
+            State.OK,
+            "Runs at $hours$nextRun$ranAgo — last cycle: ${status.movementSummary()}.",
+        )
     }
 
     private fun toolChecks(): List<Check> {
@@ -223,35 +227,6 @@ object HealthCheckService {
         LOG.warn("launchctl list $label failed", throwable)
         null
     }
-
-    private fun readSyncStatus(statusFile: File): SyncStatus? = try {
-        val json = JsonParser.parseString(statusFile.readText()).asJsonObject
-        SyncStatus(
-            exported = json.get("exported")?.asInt ?: 0,
-            imported = json.get("imported")?.asInt ?: 0,
-            deleted = json.get("deleted")?.asInt ?: 0,
-            steps = json.getAsJsonArray("steps")?.mapNotNull { element ->
-                val step = element as? JsonObject ?: return@mapNotNull null
-                SyncStep(
-                    step = step.get("step")?.asString ?: "?",
-                    ok = step.get("ok")?.asBoolean ?: false,
-                    detail = step.get("detail")?.asString ?: "",
-                )
-            }.orEmpty(),
-        )
-    } catch (throwable: Throwable) {
-        LOG.warn("Could not parse ${statusFile.absolutePath}", throwable)
-        null
-    }
-
-    private data class SyncStatus(
-        val exported: Int,
-        val imported: Int,
-        val deleted: Int,
-        val steps: List<SyncStep>,
-    )
-
-    private data class SyncStep(val step: String, val ok: Boolean, val detail: String)
 
     private fun cacheFile(name: String): File =
         File(System.getProperty("user.home"), ".claude-session-cache/$name")

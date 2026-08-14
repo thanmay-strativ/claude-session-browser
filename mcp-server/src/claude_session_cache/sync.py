@@ -10,12 +10,13 @@ tombstones against their own caches.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
 import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .db import DEFAULT_CACHE_DIR
@@ -63,19 +64,66 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _compile_extra_patterns(patterns: list[str] | None, stats: SyncStats) -> list[re.Pattern[str]]:
+    """Compile the user's own redaction regexes, reporting the ones that don't compile.
+
+    A broken pattern is dropped rather than fatal — but it is named in the sync steps,
+    because a redaction rule that silently never ran is the worst possible failure here.
+    """
+    compiled: list[re.Pattern[str]] = []
+    for pattern in patterns or []:
+        try:
+            compiled.append(re.compile(pattern))
+        except re.error as error:
+            stats.steps.append(
+                {
+                    "step": "redaction",
+                    "ok": False,
+                    "detail": f"Custom pattern {pattern!r} is not a valid regex and was skipped: {error}",
+                }
+            )
+    return compiled
+
+
+def _apply_extra_redaction(text: str | None, patterns: list[re.Pattern[str]]) -> str | None:
+    if not text or not patterns:
+        return text
+    redacted = text
+    for pattern in patterns:
+        redacted = pattern.sub("[REDACTED:custom]", redacted)
+    return redacted
+
+
+def _redaction_fingerprint(patterns: list[str] | None) -> str:
+    """Identifies the redaction rules a file was written under.
+
+    Stored in each exported header so that changing the patterns changes the header,
+    which is what forces already-exported sessions to be rewritten under the new
+    rules instead of being skipped as unchanged.
+    """
+    if not patterns:
+        return "default"
+    digest = hashlib.sha256("\n".join(sorted(patterns)).encode("utf-8"))
+    return digest.hexdigest()[:12]
+
+
 def export_sessions(
     connection: sqlite3.Connection,
     repo_path: Path,
     owner: str,
     projects: list[str],
     stats: SyncStats | None = None,
+    min_messages: int = 0,
+    max_age_days: int = 0,
+    extra_redaction_patterns: list[str] | None = None,
 ) -> SyncStats:
     """Write this machine's eligible sessions into the owner's directories in the repo.
 
     Eligible means: locally owned (`owner IS NULL`), a primary session (not a
-    subagent transcript), and in an allowlisted project. A session marked
-    "excludeFromSync" in the plugin is never written; if it was exported earlier,
-    its file is removed and a tombstone appended so teammates' caches drop it too.
+    subagent transcript), in an allowlisted project, not marked "excludeFromSync"
+    in the plugin, and past the size/age floors. Every ineligible session that was
+    exported earlier is retracted — file removed, tombstone appended — so tightening
+    a filter cleans up what a looser one already published instead of orphaning it.
     """
     stats = stats or SyncStats()
     if not projects:
@@ -93,6 +141,14 @@ def export_sessions(
         """,
         projects,
     ).fetchall()
+
+    extra_patterns = _compile_extra_patterns(extra_redaction_patterns, stats)
+    redaction_fingerprint = _redaction_fingerprint(extra_redaction_patterns)
+    age_cutoff = (
+        (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        if max_age_days > 0
+        else None
+    )
 
     excluded_ids = {
         session_id
@@ -114,11 +170,18 @@ def export_sessions(
         target_dir = repo_path / _path_segment(row["project_name"]) / owner_segment
         target_file = target_dir / f"{session_id}.jsonl"
 
-        if session_id in excluded_ids:
+        eligible = (
+            session_id not in excluded_ids
+            and (row["message_count"] or 0) >= min_messages
+            and (age_cutoff is None or (row["last_activity_at"] or "") >= age_cutoff)
+        )
+        if not eligible:
             if target_file.is_file():
                 target_file.unlink()
                 _append_tombstone(target_dir, session_id)
                 stats.tombstoned += 1
+            else:
+                stats.export_skipped += 1
             continue
 
         header = {
@@ -126,10 +189,11 @@ def export_sessions(
             "type": "session",
             "session_id": session_id,
             "owner": owner,
+            "redaction": redaction_fingerprint,
             "project_name": row["project_name"],
             "project_path": row["project_path"],
-            "title": row["title"],
-            "first_prompt": row["first_prompt"],
+            "title": _apply_extra_redaction(row["title"], extra_patterns),
+            "first_prompt": _apply_extra_redaction(row["first_prompt"], extra_patterns),
             "model": row["model"],
             "git_branch": row["git_branch"],
             "started_at": row["started_at"],
@@ -160,7 +224,7 @@ def export_sessions(
                             "role": message_row["role"],
                             "tool_name": message_row["tool_name"],
                             "timestamp": message_row["timestamp"],
-                            "text": message_row["text"],
+                            "text": _apply_extra_redaction(message_row["text"], extra_patterns),
                         },
                         ensure_ascii=False,
                     )
@@ -442,7 +506,27 @@ def _run_cycle(connection: sqlite3.Connection, config: TeamSyncConfig, stats: Sy
     ingest_stats = ingest(connection)
     stats.steps.append({"step": "ingest", "ok": True, "detail": json.dumps(ingest_stats.as_dict())})
 
-    export_sessions(connection, repo_path, config.owner, config.projects, stats)
+    if config.paused:
+        stats.steps.append(
+            {
+                "step": "export",
+                "ok": True,
+                "detail": "Sharing is paused in settings — teammates' sessions were still pulled in, "
+                "but nothing of yours was exported or pushed.",
+            }
+        )
+        return stats
+
+    export_sessions(
+        connection,
+        repo_path,
+        config.owner,
+        config.projects,
+        stats,
+        min_messages=config.min_messages,
+        max_age_days=config.max_age_days,
+        extra_redaction_patterns=config.extra_redaction_patterns,
+    )
 
     if not has_git:
         stats.steps.append({"step": "push", "ok": False, "detail": f"{repo_path} is not a git repository."})

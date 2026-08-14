@@ -55,6 +55,7 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.DefaultComboBoxModel
 import javax.swing.JButton
+import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPopupMenu
@@ -153,6 +154,7 @@ class SessionBrowserPanel(
         font = font.deriveFont(font.size2D - 1f)
         addActionListener { toggleMcp() }
     }
+    private val syncStrip = TeamSyncStatusStrip(project)
     private val autoRefreshTimer = Timer(AUTO_REFRESH_INTERVAL_MILLIS) {
         if (!project.isDisposed) reload()
     }.apply { isRepeats = true }
@@ -172,11 +174,20 @@ class SessionBrowserPanel(
         addHierarchyListener { event ->
             if (event.changeFlags and HierarchyEvent.DISPLAYABILITY_CHANGED.toLong() != 0L && !isDisplayable) {
                 autoRefreshTimer.stop()
+                syncStrip.stopTimer()
             }
         }
     }
 
 
+    /**
+     * Two aligned rows and a status strip.
+     *
+     * The action buttons are icon-only and uniformly sized: a text "Stats" button rendered
+     * at a different width from the icon buttons beside it, which is what made the previous
+     * row look ragged. Every control on a row now shares one height, so the baseline runs
+     * straight across.
+     */
     private fun buildToolbar(): JComponent {
         searchField.textEditor.emptyText.text = "Search title, branch, tag, project…"
         searchField.toolTipText = "Matches the title, opening message, project, git branch and " +
@@ -186,66 +197,81 @@ class SessionBrowserPanel(
         })
         contentSearchCheckbox.addActionListener { onSearchChanged() }
 
-        val stats = JButton("Stats").apply {
-            toolTipText = "Show session statistics"
-            isFocusable = false
-            addActionListener { StatsDialog(project, allSessions).show() }
+        val stats = toolbarButton(AllIcons.Actions.Profile, "Session statistics and health") {
+            StatsDialog(project, allSessions).show()
         }
-
-        val settings = JButton(AllIcons.General.GearPlain).apply {
-            toolTipText = "Add or edit Claude environments"
-            isFocusable = false
-            addActionListener { openSettings() }
+        val settings = toolbarButton(AllIcons.General.GearPlain, "Settings: environments, team sync") {
+            openSettings()
         }
+        styleToolbarButton(refreshButton)
 
-        val actions = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(2), 0)).apply {
+        val actions = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, JBUI.scale(2), 0)).apply {
             isOpaque = false
-            add(stats, BorderLayout.WEST)
-            add(
-                JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(2), 0)).apply {
-                    isOpaque = false
-                    add(settings, BorderLayout.WEST)
-                    add(refreshButton, BorderLayout.EAST)
-                },
-                BorderLayout.EAST,
-            )
+            add(stats)
+            add(settings)
+            add(refreshButton)
         }
 
-        val searchRow = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(4), 0)).apply {
-            background = UIUtil.getPanelBackground()
+        val searchRow = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(6), 0)).apply {
+            isOpaque = false
             add(searchField, BorderLayout.CENTER)
             add(actions, BorderLayout.EAST)
         }
 
-        val filterOptions = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(6), 0)).apply {
+        val checkboxes = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, JBUI.scale(8), 0)).apply {
             isOpaque = false
-            add(contentSearchCheckbox, BorderLayout.WEST)
-            add(mcpToggle, BorderLayout.EAST)
+            add(contentSearchCheckbox)
+            add(mcpToggle)
         }
 
-        val filterRow = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(4), 0)).apply {
+        val filterRow = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(6), 0)).apply {
             isOpaque = false
-            border = JBUI.Borders.emptyTop(4)
-            add(environmentCombo, BorderLayout.WEST)
+            border = JBUI.Borders.emptyTop(6)
             add(
-                JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
                     isOpaque = false
+                    add(environmentCombo)
                     add(filterCombo)
                 },
-                BorderLayout.CENTER,
+                BorderLayout.WEST,
             )
-            add(filterOptions, BorderLayout.EAST)
+            add(checkboxes, BorderLayout.EAST)
         }
 
         refreshEnvironmentCombo()
         refreshMcpToggleState()
 
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty(6, 6, 4, 6)
+            border = JBUI.Borders.empty(6, 6, 2, 6)
             background = UIUtil.getPanelBackground()
-            add(searchRow, BorderLayout.NORTH)
-            add(filterRow, BorderLayout.SOUTH)
+            add(
+                JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                    isOpaque = false
+                    add(searchRow, BorderLayout.NORTH)
+                    add(filterRow, BorderLayout.SOUTH)
+                },
+                BorderLayout.NORTH,
+            )
+            add(syncStrip, BorderLayout.SOUTH)
         }
+    }
+
+    private fun toolbarButton(icon: javax.swing.Icon, tooltip: String, onClick: () -> Unit): JButton =
+        JButton(icon).apply {
+            toolTipText = tooltip
+            isFocusable = false
+            addActionListener { onClick() }
+            styleToolbarButton(this)
+        }
+
+    /** One size for every toolbar button, so the row reads as a single control group. */
+    private fun styleToolbarButton(button: JButton) {
+        val side = JBUI.scale(28)
+        button.preferredSize = Dimension(side, side)
+        button.minimumSize = button.preferredSize
+        button.maximumSize = button.preferredSize
+        button.margin = JBUI.emptyInsets()
+        button.putClientProperty("JButton.buttonType", "toolBarButton")
     }
 
     private fun configureTree() {
@@ -306,6 +332,7 @@ class SessionBrowserPanel(
 
         applyAutoRefreshSetting()
         refreshEnvironmentCombo()
+        syncStrip.refresh()
         if (SessionMetadataStore.sessionRoot() != previousRoot) {
             searchField.text = ""
             contentMatchIds = emptySet()
@@ -534,6 +561,15 @@ class SessionBrowserPanel(
     private fun buildContextMenu(sessions: List<ClaudeSession>): JPopupMenu {
         if (sessions.size > 1) {
             return JPopupMenu().apply {
+                if (SessionMetadataStore.teamSync().enabled) {
+                    add(menuItem("Share ${sessions.size} sessions with the team") {
+                        setShared(sessions, shared = true)
+                    })
+                    add(menuItem("Keep ${sessions.size} sessions private") {
+                        setShared(sessions, shared = false)
+                    })
+                    addSeparator()
+                }
                 add(menuItem("Delete ${sessions.size} sessions…") { deleteSessions(sessions) })
             }
         }
@@ -552,11 +588,9 @@ class SessionBrowserPanel(
             add(menuItem(if (SessionMetadataStore.isPinned(session.sessionId)) "Unpin session" else "Pin session") {
                 togglePin(session)
             })
-            add(
-                menuItem(
-                    if (SessionMetadataStore.isExcludedFromSync(session.sessionId)) "Unmark private" else "Mark private"
-                ) { togglePrivate(session) }
-            )
+            if (SessionMetadataStore.teamSync().enabled) {
+                add(shareWithTeamItem(session))
+            }
             addSeparator()
             add(menuItem("Export as Markdown…") { SessionExporter.export(project, session) })
             addSeparator()
@@ -639,11 +673,27 @@ class SessionBrowserPanel(
         rebuildTree(searchField.text)
     }
 
-    private fun togglePrivate(session: ClaudeSession) {
-        SessionMetadataStore.setExcludedFromSync(
-            session.sessionId,
-            !SessionMetadataStore.isExcludedFromSync(session.sessionId),
-        )
+    /**
+     * Sharing is the default and is shown as a ticked box, not as an opt-in: every
+     * allowlisted session already syncs, so the honest control is one that starts checked
+     * and is unticked to hold a session back.
+     */
+    private fun shareWithTeamItem(session: ClaudeSession): JCheckBoxMenuItem =
+        JCheckBoxMenuItem("Share with team").apply {
+            isSelected = !SessionMetadataStore.isExcludedFromSync(session.sessionId)
+            toolTipText = if (isSelected) {
+                "Untick to keep this session on your machine. If it already synced, it is retracted " +
+                    "from your teammates' caches on the next run."
+            } else {
+                "Tick to include this session in the next team sync."
+            }
+            addActionListener { setShared(listOf(session), shared = isSelected) }
+        }
+
+    private fun setShared(sessions: List<ClaudeSession>, shared: Boolean) {
+        sessions.forEach { session ->
+            SessionMetadataStore.setExcludedFromSync(session.sessionId, !shared)
+        }
         rebuildTree(searchField.text)
     }
 
@@ -835,6 +885,7 @@ private class SessionRowRenderer : JComponent(), TreeCellRenderer {
     private var session: ClaudeSession? = null
     private var tags: List<String> = emptyList()
     private var pinned = false
+    private var heldBack = false
     private var isSelected = false
     private var hasTreeFocus = false
 
@@ -853,6 +904,7 @@ private class SessionRowRenderer : JComponent(), TreeCellRenderer {
         session = null
         tags = emptyList()
         pinned = false
+        heldBack = false
 
         when (val userObject = (value as? DefaultMutableTreeNode)?.userObject) {
             is ProjectGroup -> {
@@ -864,6 +916,8 @@ private class SessionRowRenderer : JComponent(), TreeCellRenderer {
                 session = userObject
                 tags = SessionTags.all(userObject)
                 pinned = SessionMetadataStore.isPinned(userObject.sessionId)
+                heldBack = SessionMetadataStore.teamSync().enabled &&
+                    SessionMetadataStore.isExcludedFromSync(userObject.sessionId)
                 toolTipText = sessionTooltip(userObject)
             }
         }
@@ -890,6 +944,13 @@ private class SessionRowRenderer : JComponent(), TreeCellRenderer {
         }
     }
 
+    /**
+     * Project name, a count pill, then a hairline running to the row's end.
+     *
+     * The rule is what separates one project from the sessions of the one above it —
+     * previously the two levels were told apart by weight alone, which at a glance made
+     * a long list read as undifferentiated.
+     */
     private fun paintGroup(canvas: Graphics2D, group: ProjectGroup) {
         canvas.font = JBFont.label().asBold()
         val metrics = canvas.fontMetrics
@@ -898,14 +959,25 @@ private class SessionRowRenderer : JComponent(), TreeCellRenderer {
         canvas.color = primaryInk()
         canvas.drawString(group.name, 0, baseline)
 
-        val countLeft = metrics.stringWidth(group.name) + JBUI.scale(8)
+        val countLabel = "${group.sessions.size}"
         canvas.font = JBFont.small()
+        val countMetrics = canvas.fontMetrics
+        val pillLeft = metrics.stringWidth(group.name) + JBUI.scale(8)
+        val pillWidth = countMetrics.stringWidth(countLabel) + JBUI.scale(10)
+        val pillHeight = countMetrics.height + JBUI.scale(1)
+        val pillTop = (height - pillHeight) / 2
+
+        canvas.color = if (isSelected) selectedChipSurface() else Ui.CHIP_SURFACE
+        canvas.fillRoundRect(pillLeft, pillTop, pillWidth, pillHeight, pillHeight, pillHeight)
         canvas.color = secondaryInk()
-        canvas.drawString(
-            "${group.sessions.size}",
-            countLeft,
-            (height - canvas.fontMetrics.height) / 2 + canvas.fontMetrics.ascent,
-        )
+        canvas.drawString(countLabel, pillLeft + JBUI.scale(5), pillTop + countMetrics.ascent)
+
+        val ruleLeft = pillLeft + pillWidth + JBUI.scale(8)
+        val ruleRight = width - JBUI.scale(4)
+        if (ruleRight > ruleLeft) {
+            canvas.color = Ui.CARD_BORDER
+            canvas.drawLine(ruleLeft, height / 2, ruleRight, height / 2)
+        }
     }
 
     private fun paintSession(canvas: Graphics2D, session: ClaudeSession) {
@@ -977,6 +1049,13 @@ private class SessionRowRenderer : JComponent(), TreeCellRenderer {
             if (label.isNotEmpty()) left = drawChip(canvas, label, left, baseline, metrics)
         }
 
+        if (heldBack) {
+            val label = "private"
+            if (left + chipWidth(label, metrics) <= limit) {
+                left = drawChip(canvas, label, left, baseline, metrics, tone = Ui.ATTENTION)
+            }
+        }
+
         for (tag in tags) {
             val label = "#$tag"
             if (left + chipWidth(label, metrics) > limit) break
@@ -1002,16 +1081,25 @@ private class SessionRowRenderer : JComponent(), TreeCellRenderer {
     private fun chipWidth(label: String, metrics: FontMetrics): Int =
         metrics.stringWidth(label) + chipPadding()
 
+    /**
+     * [tone] tints the chip's surface for state chips, keeping the label in ink — small
+     * text in a mid-tone hue would not hold contrast against either theme's row.
+     */
     private fun drawChip(
         canvas: Graphics2D,
         label: String,
         left: Int,
         baseline: Int,
         metrics: FontMetrics,
+        tone: Color? = null,
     ): Int {
         val chipWidth = chipWidth(label, metrics)
         val chipHeight = metrics.height + JBUI.scale(2)
-        canvas.color = if (isSelected) selectedChipSurface() else Ui.CHIP_SURFACE
+        canvas.color = when {
+            tone != null -> ColorUtil.withAlpha(tone, if (isSelected) 0.32 else 0.18)
+            isSelected -> selectedChipSurface()
+            else -> Ui.CHIP_SURFACE
+        }
         canvas.fillRoundRect(
             left,
             baseline - metrics.ascent - JBUI.scale(1),

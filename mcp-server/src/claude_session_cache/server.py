@@ -35,8 +35,9 @@ tags the user set by hand.
 """.strip()
 
 SCOPE_DESCRIPTION = (
-    "scope: 'mine' (default) = this user's own sessions, 'team' = own plus every "
-    "imported teammate, or a teammate's id/email for one person."
+    "scope: 'mine' = this user's own sessions, 'team' = own plus every imported "
+    "teammate, or a teammate's id/email for one person. Omit it to follow the user's "
+    "configured default (their own sessions unless they chose team-wide)."
 )
 
 app: FastMCP = FastMCP(name="claude-session-cache", instructions=INSTRUCTIONS)

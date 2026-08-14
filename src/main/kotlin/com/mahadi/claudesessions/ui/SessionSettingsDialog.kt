@@ -10,6 +10,7 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.ui.CheckBoxList
 import com.intellij.ui.CollectionListModel
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.ToolbarDecorator
@@ -17,24 +18,34 @@ import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanel
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
+import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import com.mahadi.claudesessions.CacheStatsService
 import com.mahadi.claudesessions.ClaudeEnvironment
 import com.mahadi.claudesessions.McpRuntime
 import com.mahadi.claudesessions.SessionMetadataStore
 import com.mahadi.claudesessions.SessionSettings
 import com.mahadi.claudesessions.TeamSyncConfig
+import com.mahadi.claudesessions.TeamSyncStatusService
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
+import java.awt.FlowLayout
+import java.awt.Graphics
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.swing.BoxLayout
+import javax.swing.JComboBox
 import javax.swing.JComponent
+import javax.swing.JSpinner
 import javax.swing.ListSelectionModel
+import javax.swing.SpinnerNumberModel
 import javax.swing.event.DocumentEvent
 
 private class EditableEnvironment(
@@ -46,14 +57,13 @@ private class EditableEnvironment(
     override fun toString(): String = name
 }
 
+private const val SCOPE_MINE_LABEL = "My sessions only"
+private const val SCOPE_TEAM_LABEL = "The whole team's sessions"
+
 /**
  * The plugin's settings: Claude environments, team knowledge-base sync, and general
- * preferences — one tab each.
- *
- * Each environment is one account: its transcript directory plus the executable that
- * drives it. Which one is *active* is picked from the toolbar dropdown, not here.
- * The team sync tab writes to the shared metadata sidecar, so the bundled Python sync
- * engine reads exactly what was configured here.
+ * preferences — one tab each, every tab built from titled cards rather than a flat run of
+ * fields, so a long form still reads as a few decisions instead of twenty inputs.
  */
 class SessionSettingsDialog(private val project: Project) : DialogWrapper(project) {
 
@@ -92,7 +102,9 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         )
     }
 
-    private val syncEnabledCheckbox = JBCheckBox("Sync sessions with the team knowledge base")
+    private val syncEnabledCheckbox = JBCheckBox("Share my sessions with the team")
+    private val pauseCheckbox = JBCheckBox("Pause sharing (keep receiving the team's sessions)")
+    private val notifyCheckbox = JBCheckBox("Notify me when a scheduled sync fails")
     private val repoUrlField = JBTextField()
     private val repoPathField = TextFieldWithBrowseButton().apply {
         addBrowseFolderListener(
@@ -103,9 +115,16 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         )
     }
     private val ownerField = JBTextField()
-    private val projectsField = JBTextField()
+    private val scopeCombo = JComboBox(arrayOf(SCOPE_MINE_LABEL, SCOPE_TEAM_LABEL))
+    private val projectList = CheckBoxList<String>()
+    private val minMessagesSpinner = JSpinner(SpinnerNumberModel(TeamSyncConfig.DEFAULT_MIN_MESSAGES, 0, 999, 1))
+    private val maxAgeSpinner = JSpinner(SpinnerNumberModel(0, 0, 3650, 30))
+    private val redactionArea = JBTextArea(4, 40).apply {
+        lineWrap = false
+        font = JBFont.small()
+    }
     private val syncHoursField = JBTextField()
-    private val syncStatusLabel = JBLabel()
+    private val statusBanner = StatusBanner()
 
     private val autoRefreshCheckbox = JBCheckBox(
         "Auto-refresh the session list every ${SessionSettings.autoRefreshSeconds()}s",
@@ -124,6 +143,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         wireListeners()
         init()
         prefillOwnerFromGit()
+        loadKnownProjectsAsync()
     }
 
     private fun loadEnvironments() {
@@ -146,33 +166,93 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     private fun loadTeamSync() {
         val config = SessionMetadataStore.teamSync()
         syncEnabledCheckbox.isSelected = config.enabled
+        pauseCheckbox.isSelected = config.paused
+        notifyCheckbox.isSelected = config.notifyOnFailure
         repoUrlField.text = config.repoUrl.orEmpty()
         repoPathField.text = config.repoPath.orEmpty()
         ownerField.text = config.owner.orEmpty()
-        projectsField.text = config.projects.joinToString(", ")
+        scopeCombo.selectedItem =
+            if (config.defaultScope == TeamSyncConfig.SCOPE_TEAM) SCOPE_TEAM_LABEL else SCOPE_MINE_LABEL
+        minMessagesSpinner.value = config.minMessages
+        maxAgeSpinner.value = config.maxAgeDays
+        redactionArea.text = config.extraRedactionPatterns.joinToString("\n")
         syncHoursField.text = config.syncHours.joinToString(", ")
-        updateSyncStatus()
+
+        config.projects.forEach { projectList.addItem(it, it, true) }
+        refreshStatusBanner()
         updateSyncFieldsEnabled()
     }
 
-    private fun updateSyncStatus() {
-        syncStatusLabel.text = when {
-            !McpRuntime.isInstalled() ->
-                "The sync engine installs with session search — tick MCP in the panel toolbar first."
-            McpRuntime.isSyncAgentInstalled() ->
-                "Scheduled sync is installed. Log: ~/.claude-session-cache/sync.log"
-            else ->
-                "Scheduled sync is not installed yet — it is set up when you apply with sync enabled."
+    /**
+     * Offers the projects the cache already knows about, ticked where they are configured.
+     * Anything configured but unknown stays in the list — a cache that has not been built
+     * yet must never silently drop a project the user chose.
+     */
+    private fun loadKnownProjectsAsync() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val known = CacheStatsService.load()?.perProject.orEmpty()
+            if (known.isEmpty()) return@executeOnPooledThread
+            ApplicationManager.getApplication().invokeLater(
+                {
+                    val alreadyListed = (0 until projectList.itemsCount).mapNotNull { projectList.getItemAt(it) }
+                    known
+                        .filter { it.label !in alreadyListed }
+                        .sortedByDescending { it.count }
+                        .forEach { projectList.addItem(it.label, "${it.label}  (${it.count} sessions)", false) }
+                },
+                ModalityState.any(),
+            )
+        }
+    }
+
+    private fun refreshStatusBanner() {
+        val config = SessionMetadataStore.teamSync()
+        if (!config.enabled) {
+            statusBanner.show(Ui.inkMuted, "Not sharing", "Turn this on to build a shared team knowledge base.")
+            return
+        }
+        val status = TeamSyncStatusService.load()
+        val nextRun = TeamSyncStatusService.untilNextRun(config.syncHours)
+        when {
+            config.paused -> statusBanner.show(
+                Ui.ATTENTION,
+                "Sharing paused",
+                "Teammates' sessions still arrive; yours are not published.",
+            )
+
+            status == null -> statusBanner.show(
+                Ui.ACCENT,
+                "Ready",
+                "Scheduled" + (nextRun?.let { ", first run $it" } ?: "") + ".",
+            )
+
+            !status.ok -> statusBanner.show(
+                Ui.BAD,
+                "Last sync failed",
+                "Failed at '${status.failedStep}'. See Stats → Health.",
+            )
+
+            else -> statusBanner.show(
+                Ui.GOOD,
+                "Sharing " + config.projects.size + " project" + if (config.projects.size == 1) "" else "s",
+                buildString {
+                    status.finishedAt?.let { append("Synced ").append(TeamSyncStatusService.relativeTime(it)) }
+                    nextRun?.let {
+                        if (isNotEmpty()) append(" · ")
+                        append("next ").append(it)
+                    }
+                },
+            )
         }
     }
 
     private fun updateSyncFieldsEnabled() {
         val enabled = syncEnabledCheckbox.isSelected
-        repoUrlField.isEnabled = enabled
-        repoPathField.isEnabled = enabled
-        ownerField.isEnabled = enabled
-        projectsField.isEnabled = enabled
-        syncHoursField.isEnabled = enabled
+        listOf<JComponent>(
+            repoUrlField, repoPathField, ownerField, scopeCombo, projectList,
+            minMessagesSpinner, maxAgeSpinner, redactionArea, syncHoursField,
+            pauseCheckbox, notifyCheckbox,
+        ).forEach { it.isEnabled = enabled }
     }
 
     /** Prefills the owner id from `git config user.email`, without ever overwriting a typed one. */
@@ -217,10 +297,15 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     }
 
     override fun createCenterPanel(): JComponent = JBTabbedPane().apply {
-        preferredSize = Dimension(JBUI.scale(620), JBUI.scale(520))
-        addTab("Environments", environmentsTab())
-        addTab("Team Sync", teamSyncTab())
-        addTab("General", generalTab())
+        preferredSize = Dimension(JBUI.scale(660), JBUI.scale(580))
+        addTab("Environments", scrollable(environmentsTab()))
+        addTab("Team Sync", scrollable(teamSyncTab()))
+        addTab("General", scrollable(generalTab()))
+    }
+
+    private fun scrollable(content: JComponent): JComponent = JBScrollPane(content).apply {
+        border = JBUI.Borders.empty()
+        verticalScrollBar.unitIncrement = JBUI.scale(16)
     }
 
     private fun environmentsTab(): JComponent {
@@ -232,123 +317,252 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
             .createPanel()
             .apply {
                 alignmentX = Component.LEFT_ALIGNMENT
-                preferredSize = Dimension(JBUI.scale(560), JBUI.scale(112))
-                maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(112))
+                preferredSize = Dimension(JBUI.scale(560), JBUI.scale(120))
+                maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(120))
             }
 
-        return tabPanel(
-            "One entry per Claude account. Switch between them from the dropdown in the panel.",
-        ) {
-            add(listPanel)
-            add(field("Name", nameField, "Shown in the toolbar dropdown, e.g. claude or claude-work."))
-            add(field("Session directory", sessionRootField, "Where this account's transcripts are read from."))
+        return tabPanel {
             add(
-                field(
-                    "Claude config directory",
-                    configDirField,
-                    "Passed as CLAUDE_CONFIG_DIR when resuming or tagging — this is what makes " +
-                        "a second account work off one binary. Blank for the default account.",
-                )
+                section(
+                    "Accounts",
+                    "One entry per Claude account. Switch between them from the dropdown in the panel.",
+                ) {
+                    add(listPanel)
+                }
             )
             add(
-                field(
-                    "Claude executable",
-                    claudeBinaryField,
-                    "Only needed if this account has its own install. Leave blank to auto-detect.",
-                )
+                section("Selected account", null) {
+                    add(field("Name", nameField, "Shown in the toolbar dropdown, e.g. claude or claude-work."))
+                    add(
+                        field(
+                            "Session directory",
+                            sessionRootField,
+                            "Where this account's transcripts are read from.",
+                        )
+                    )
+                    add(
+                        field(
+                            "Claude config directory",
+                            configDirField,
+                            "Passed as CLAUDE_CONFIG_DIR when resuming or tagging — this is what makes " +
+                                "a second account work off one binary. Blank for the default account.",
+                        )
+                    )
+                    add(
+                        field(
+                            "Claude executable",
+                            claudeBinaryField,
+                            "Only needed if this account has its own install. Leave blank to auto-detect.",
+                        )
+                    )
+                }
             )
         }
     }
 
-    private fun teamSyncTab(): JComponent = tabPanel(
-        "Shares redacted session history with your team through a private git repository, " +
-            "and pulls theirs back — so Claude can answer \"what did anyone on the team decide " +
-            "about X\". Sessions marked private in the session list never leave this machine.",
-    ) {
+    private fun teamSyncTab(): JComponent = tabPanel {
+        add(statusBanner)
         add(
-            JBPanel<JBPanel<*>>(BorderLayout()).apply {
-                isOpaque = false
-                alignmentX = Component.LEFT_ALIGNMENT
-                border = JBUI.Borders.emptyTop(4)
-                add(syncEnabledCheckbox, BorderLayout.WEST)
+            section(
+                "Team knowledge base",
+                "Shares redacted session history through a private git repository and pulls the " +
+                    "team's back, so Claude can answer \"what did anyone decide about X\".",
+            ) {
+                add(checkboxRow(syncEnabledCheckbox))
+                add(checkboxRow(pauseCheckbox))
             }
         )
         add(
-            field(
-                "Repository URL",
-                repoUrlField,
-                "The private repo's git URL, e.g. git@github.com:your-org/claude-knowledge-base.git. " +
-                    "Used to clone when the local path below does not exist yet.",
-            )
+            section("Repository", null) {
+                add(
+                    field(
+                        "Repository URL",
+                        repoUrlField,
+                        "The private repo's git URL. Used to clone when the local path does not exist yet.",
+                    )
+                )
+                add(
+                    field(
+                        "Local path",
+                        repoPathField,
+                        "Where the repo lives (or should be cloned to) on this machine.",
+                    )
+                )
+                add(
+                    field(
+                        "Your id",
+                        ownerField,
+                        "How teammates see your sessions — your work email is the convention. " +
+                            "Prefilled from git config user.email.",
+                    )
+                )
+            }
         )
         add(
-            field(
-                "Local path",
-                repoPathField,
-                "Where the repo lives (or should be cloned to) on this machine, " +
-                    "e.g. ~/claude-knowledge-base.",
-            )
+            section(
+                "What gets shared",
+                "Only ticked projects leave this machine. Anything you untick in the session list " +
+                    "stays private — and is retracted from teammates if it already synced.",
+            ) {
+                add(
+                    field(
+                        "Projects",
+                        JBScrollPane(projectList).apply {
+                            preferredSize = Dimension(JBUI.scale(560), JBUI.scale(120))
+                            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(120))
+                        },
+                        "Ticked projects sync. The list is drawn from your indexed history.",
+                    )
+                )
+                add(
+                    numberField(
+                        "Skip sessions under",
+                        minMessagesSpinner,
+                        "messages",
+                        "Throwaway sessions carry no decision and only dilute team search. 0 shares everything.",
+                    )
+                )
+                add(
+                    numberField(
+                        "Skip sessions older than",
+                        maxAgeSpinner,
+                        "days",
+                        "0 means no age limit. Tightening this retracts anything already shared that " +
+                            "no longer qualifies.",
+                    )
+                )
+            }
         )
         add(
-            field(
-                "Your id",
-                ownerField,
-                "How teammates see your sessions — your work email is the convention. " +
-                    "Prefilled from git config user.email.",
-            )
+            section("Claude's search", null) {
+                add(
+                    field(
+                        "Search by default",
+                        scopeCombo,
+                        "What Claude searches when it doesn't name a scope. It can always be asked " +
+                            "for the team explicitly.",
+                    )
+                )
+            }
         )
         add(
-            field(
-                "Projects to share",
-                projectsField,
-                "Comma-separated project names (the folder name, e.g. tourbooker). " +
-                    "Only these are exported — personal projects stay local. Empty shares nothing.",
-            )
+            section(
+                "Safety",
+                "Secrets are already redacted by shape before anything is written. These add your own rules.",
+            ) {
+                add(
+                    field(
+                        "Extra redaction patterns",
+                        JBScrollPane(redactionArea).apply {
+                            preferredSize = Dimension(JBUI.scale(560), JBUI.scale(76))
+                            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(76))
+                        },
+                        "One regular expression per line — internal hostnames, customer names. " +
+                            "Matches are replaced before export; changing these re-exports affected sessions.",
+                    )
+                )
+                add(checkboxRow(notifyCheckbox))
+            }
         )
         add(
-            field(
-                "Sync at (hours)",
-                syncHoursField,
-                "Comma-separated hours of the day, 0-23. The default 9, 18 syncs at the start " +
-                    "and end of the workday; a missed run catches up at the next login.",
-            )
-        )
-        add(
-            syncStatusLabel.apply {
-                foreground = UIUtil.getContextHelpForeground()
-                font = JBFont.small()
-                alignmentX = Component.LEFT_ALIGNMENT
-                border = JBUI.Borders.emptyTop(12)
+            section("Schedule", null) {
+                add(
+                    field(
+                        "Sync at (hours)",
+                        syncHoursField,
+                        "Comma-separated hours, 0-23. A missed run catches up at the next login.",
+                    )
+                )
             }
         )
     }
 
-    private fun generalTab(): JComponent = tabPanel(
-        "Preferences for the session list itself.",
-    ) {
+    private fun generalTab(): JComponent = tabPanel {
         add(
-            JBPanel<JBPanel<*>>(BorderLayout()).apply {
-                isOpaque = false
-                alignmentX = Component.LEFT_ALIGNMENT
-                border = JBUI.Borders.emptyTop(4)
-                add(autoRefreshCheckbox, BorderLayout.WEST)
+            section("Session list", "Preferences for the panel itself.") {
+                add(checkboxRow(autoRefreshCheckbox))
             }
         )
     }
 
-    private fun tabPanel(description: String, content: JBPanel<JBPanel<*>>.() -> Unit): JComponent =
+    private fun tabPanel(content: JBPanel<JBPanel<*>>.() -> Unit): JComponent =
         JBPanel<JBPanel<*>>().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = UIUtil.getPanelBackground()
             border = JBUI.Borders.empty(10, 12)
+            content()
+        }
+
+    /** A titled card: the unit the form is read in, rather than one long ladder of labels. */
+    private fun section(
+        title: String,
+        description: String?,
+        content: JBPanel<JBPanel<*>>.() -> Unit,
+    ): JComponent {
+        val body = JBPanel<JBPanel<*>>().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
             add(
-                JBLabel(wrapped(description)).apply {
-                    foreground = UIUtil.getContextHelpForeground()
-                    font = JBFont.small()
+                JBLabel(title).apply {
+                    font = JBFont.label().asBold()
                     alignmentX = Component.LEFT_ALIGNMENT
-                    border = JBUI.Borders.emptyBottom(6)
                 }
             )
+            if (description != null) {
+                add(
+                    JBLabel(wrapped(description)).apply {
+                        foreground = Ui.inkMuted
+                        font = JBFont.small()
+                        alignmentX = Component.LEFT_ALIGNMENT
+                        border = JBUI.Borders.emptyTop(2)
+                    }
+                )
+            }
             content()
+        }
+        return Card().apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = JBUI.Borders.empty(10, 12)
+            add(body, BorderLayout.CENTER)
+        }.also { card ->
+            card.maximumSize = Dimension(Int.MAX_VALUE, card.preferredSize.height)
+        }
+    }
+
+    private fun checkboxRow(checkbox: JBCheckBox): JComponent =
+        JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = JBUI.Borders.emptyTop(8)
+            maximumSize = Dimension(Int.MAX_VALUE, checkbox.preferredSize.height + JBUI.scale(8))
+            add(checkbox, BorderLayout.WEST)
+        }
+
+    /** A number input that reads as a sentence: "Skip sessions under [3] messages". */
+    private fun numberField(label: String, spinner: JSpinner, unit: String, hint: String): JComponent =
+        JBPanel<JBPanel<*>>().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = JBUI.Borders.emptyTop(10)
+            add(
+                JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
+                    isOpaque = false
+                    alignmentX = Component.LEFT_ALIGNMENT
+                    maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(30))
+                    add(JBLabel(label).apply { font = JBFont.label().asBold() })
+                    add(spinner.apply { preferredSize = Dimension(JBUI.scale(72), JBUI.scale(26)) })
+                    add(JBLabel(unit).apply { foreground = Ui.inkMuted })
+                }
+            )
+            add(
+                JBLabel(wrapped(hint)).apply {
+                    foreground = Ui.inkMuted
+                    font = JBFont.small()
+                    alignmentX = Component.LEFT_ALIGNMENT
+                    border = JBUI.Borders.emptyTop(2)
+                }
+            )
         }
 
     private fun field(label: String, editor: JComponent, hint: String): JComponent =
@@ -356,14 +570,21 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
-            border = JBUI.Borders.emptyTop(8)
+            border = JBUI.Borders.emptyTop(10)
             add(JBLabel(label).apply {
                 font = JBFont.label().asBold()
                 alignmentX = Component.LEFT_ALIGNMENT
             })
-            add(editor.apply { alignmentX = Component.LEFT_ALIGNMENT })
+            add(
+                editor.apply {
+                    alignmentX = Component.LEFT_ALIGNMENT
+                    if (this !is JBScrollPane) {
+                        maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+                    }
+                }
+            )
             add(JBLabel(wrapped(hint)).apply {
-                foreground = UIUtil.getContextHelpForeground()
+                foreground = Ui.inkMuted
                 font = JBFont.small()
                 alignmentX = Component.LEFT_ALIGNMENT
                 border = JBUI.Borders.emptyTop(2)
@@ -520,8 +741,22 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 syncHoursField,
             )
         }
+        invalidRedactionPattern()?.let {
+            return ValidationInfo("'$it' is not a valid regular expression.", redactionArea)
+        }
         return null
     }
+
+    private fun invalidRedactionPattern(): String? = redactionPatterns().firstOrNull { pattern ->
+        runCatching { Regex(pattern) }.isFailure
+    }
+
+    private fun redactionPatterns(): List<String> =
+        redactionArea.text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+    private fun selectedProjects(): List<String> =
+        (0 until projectList.itemsCount)
+            .mapNotNull { index -> projectList.getItemAt(index)?.takeIf { projectList.isItemSelected(index) } }
 
     private fun parsedSyncHours(): List<Int>? {
         val text = syncHoursField.text.trim()
@@ -551,11 +786,21 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
 
         val syncConfig = TeamSyncConfig(
             enabled = syncEnabledCheckbox.isSelected,
+            paused = pauseCheckbox.isSelected,
             repoPath = expandHome(repoPathField.text.trim()).takeIf { it.isNotEmpty() },
             repoUrl = repoUrlField.text.trim().takeIf { it.isNotEmpty() },
             owner = ownerField.text.trim().takeIf { it.isNotEmpty() },
-            projects = projectsField.text.split(",").map { it.trim() }.filter { it.isNotEmpty() },
+            projects = selectedProjects(),
             syncHours = parsedSyncHours() ?: TeamSyncConfig.DEFAULT_SYNC_HOURS,
+            defaultScope = if (scopeCombo.selectedItem == SCOPE_TEAM_LABEL) {
+                TeamSyncConfig.SCOPE_TEAM
+            } else {
+                TeamSyncConfig.SCOPE_MINE
+            },
+            minMessages = minMessagesSpinner.value as? Int ?: TeamSyncConfig.DEFAULT_MIN_MESSAGES,
+            maxAgeDays = maxAgeSpinner.value as? Int ?: 0,
+            extraRedactionPatterns = redactionPatterns(),
+            notifyOnFailure = notifyCheckbox.isSelected,
         )
         SessionMetadataStore.setTeamSync(syncConfig)
         applyTeamSync(syncConfig)
@@ -617,5 +862,63 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         }
     } catch (throwable: Throwable) {
         false to (throwable.message ?: "Unknown error")
+    }
+
+    /** State at a glance, above the controls that change it. */
+    private class StatusBanner : Card() {
+
+        private val dot = Dot()
+        private val headline = JBLabel().apply { font = JBFont.label().asBold() }
+        private val detail = JBLabel().apply {
+            font = JBFont.small()
+            foreground = Ui.inkMuted
+        }
+
+        init {
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = JBUI.Borders.empty(10, 12)
+            add(
+                JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0)).apply {
+                    isOpaque = false
+                    add(dot)
+                    add(
+                        JBPanel<JBPanel<*>>().apply {
+                            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                            isOpaque = false
+                            add(headline)
+                            add(detail)
+                        }
+                    )
+                },
+                BorderLayout.CENTER,
+            )
+        }
+
+        fun show(tone: Color, title: String, message: String) {
+            dot.tone = tone
+            headline.text = title
+            detail.text = message
+            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            repaint()
+        }
+
+        private class Dot : JComponent() {
+            var tone: Color = Ui.inkMuted
+
+            init {
+                val size = JBUI.scale(10)
+                preferredSize = Dimension(size, size)
+            }
+
+            override fun paintComponent(graphics: Graphics) {
+                val canvas = Ui.antialiased(graphics.create())
+                try {
+                    canvas.color = tone
+                    canvas.fillOval(0, 0, width, height)
+                } finally {
+                    canvas.dispose()
+                }
+            }
+        }
     }
 }

@@ -34,11 +34,17 @@ private data class EnvironmentEntry(
 
 private data class TeamSyncEntry(
     var enabled: Boolean = false,
+    var paused: Boolean = false,
     var repoPath: String? = null,
     var repoUrl: String? = null,
     var owner: String? = null,
     var projects: MutableList<String> = mutableListOf(),
     var syncHours: MutableList<Int> = mutableListOf(),
+    var defaultScope: String? = null,
+    var minMessages: Int? = null,
+    var maxAgeDays: Int? = null,
+    var extraRedactionPatterns: MutableList<String> = mutableListOf(),
+    var notifyOnFailure: Boolean? = null,
 )
 
 private data class MetadataFile(
@@ -162,12 +168,22 @@ object SessionMetadataStore {
         val entry = load().teamSync ?: return TeamSyncConfig()
         TeamSyncConfig(
             enabled = entry.enabled,
+            paused = entry.paused,
             repoPath = entry.repoPath?.trim()?.takeIf { it.isNotEmpty() },
             repoUrl = entry.repoUrl?.trim()?.takeIf { it.isNotEmpty() },
             owner = entry.owner?.trim()?.takeIf { it.isNotEmpty() },
             projects = entry.projects.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
             syncHours = entry.syncHours.filter { it in 0..23 }.distinct().sorted()
                 .ifEmpty { TeamSyncConfig.DEFAULT_SYNC_HOURS },
+            defaultScope = if (entry.defaultScope?.trim()?.lowercase() == TeamSyncConfig.SCOPE_TEAM) {
+                TeamSyncConfig.SCOPE_TEAM
+            } else {
+                TeamSyncConfig.SCOPE_MINE
+            },
+            minMessages = entry.minMessages?.coerceAtLeast(0) ?: TeamSyncConfig.DEFAULT_MIN_MESSAGES,
+            maxAgeDays = entry.maxAgeDays?.coerceAtLeast(0) ?: 0,
+            extraRedactionPatterns = entry.extraRedactionPatterns.map { it.trim() }.filter { it.isNotEmpty() },
+            notifyOnFailure = entry.notifyOnFailure ?: true,
         )
     }
 
@@ -175,13 +191,27 @@ object SessionMetadataStore {
         val metadata = load()
         metadata.teamSync = TeamSyncEntry(
             enabled = config.enabled,
+            paused = config.paused,
             repoPath = config.repoPath?.trim()?.takeIf { it.isNotEmpty() },
             repoUrl = config.repoUrl?.trim()?.takeIf { it.isNotEmpty() },
             owner = config.owner?.trim()?.takeIf { it.isNotEmpty() },
             projects = config.projects.map { it.trim() }.filter { it.isNotEmpty() }.distinct().toMutableList(),
             syncHours = config.syncHours.filter { it in 0..23 }.distinct().sorted().toMutableList(),
+            defaultScope = config.defaultScope,
+            minMessages = config.minMessages.coerceAtLeast(0),
+            maxAgeDays = config.maxAgeDays.coerceAtLeast(0),
+            extraRedactionPatterns = config.extraRedactionPatterns
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .toMutableList(),
+            notifyOnFailure = config.notifyOnFailure,
         )
         save(metadata)
+    }
+
+    /** Flips only the pause flag, for the panel's one-click pause. */
+    fun setTeamSyncPaused(paused: Boolean) = synchronized(this) {
+        setTeamSync(teamSync().copy(paused = paused))
     }
 
     /** Directory the active environment's transcripts are read from. */

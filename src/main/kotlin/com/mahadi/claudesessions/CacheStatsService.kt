@@ -29,6 +29,7 @@ object CacheStatsService {
         val newestActivity: String?,
         val topFiles: List<Counted>,
         val topTools: List<Counted>,
+        val perProject: List<Counted>,
     )
 
     /** One labelled tally from the cache — a file path and its sessions, a tool and its calls. */
@@ -75,6 +76,7 @@ object CacheStatsService {
             newestActivity = json.string("newest_activity"),
             topFiles = json.counted("top_files", "path", "sessions"),
             topTools = json.counted("top_tools", "tool", "calls"),
+            perProject = json.counted("per_project", "project", "sessions"),
         )
     }
 

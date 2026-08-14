@@ -11,7 +11,7 @@ import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from .metadata import active_session_root
+from .metadata import active_session_root, load_team_sync
 
 MAX_LIMIT = 50
 DEFAULT_LIMIT = 20
@@ -56,15 +56,31 @@ def _since_clause(since_days: int | None) -> tuple[str, list[object]]:
     return " AND COALESCE(s.last_activity_at, '') >= ? ", [cutoff]
 
 
+def _default_scope() -> str:
+    """What an unspecified scope means, per the plugin's Team Sync setting.
+
+    Answering "what did we decide about X" from the whole team is the point of syncing,
+    so a user who turned that on can make it the default rather than having to ask for
+    `scope="team"` every time. Falls back to "mine" whenever sync is off or unreadable —
+    a missing setting must never silently widen what gets searched.
+    """
+    try:
+        config = load_team_sync()
+    except (OSError, ValueError):
+        return "mine"
+    return "team" if config.enabled and config.default_scope == "team" else "mine"
+
+
 def _scope_clause(scope: str | None, all_accounts: bool) -> tuple[str, list[object]]:
     """Restrict results along two independent axes: whose sessions, and which account.
 
-    `scope` picks the person: "mine" (default) is this machine's own sessions, "team"
-    adds every imported teammate, and any other value names one teammate. `all_accounts`
-    stays what it always was — which of *my own* Claude accounts — and only applies to
-    my own rows, because imported rows never belong to a local account.
+    `scope` picks the person: "mine" is this machine's own sessions, "team" adds every
+    imported teammate, and any other value names one teammate. Omitting it follows the
+    user's configured default. `all_accounts` stays what it always was — which of *my
+    own* Claude accounts — and only applies to my own rows, because imported rows never
+    belong to a local account.
     """
-    normalized = (scope or "mine").strip().lower()
+    normalized = (scope or _default_scope()).strip().lower()
     if normalized == "mine":
         if all_accounts:
             return " AND s.owner IS NULL ", []

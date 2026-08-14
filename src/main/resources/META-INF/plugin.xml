@@ -47,9 +47,12 @@
         <ul>
             <li>Team sync: share redacted sessions with your team through a private git repo</li>
             <li>Claude can search the whole team's history (scope: mine / team / one person)</li>
-            <li>Mark private is enforced — and retracts a session even after it synced</li>
-            <li>Settings split into tabs; team sync fully configurable there</li>
-            <li>Health tab in Stats: background jobs, MCP per account, tools</li>
+            <li>Sync status strip: last run, what moved, and a live countdown to the next one</li>
+            <li>"Share with team" per session, ticked by default; unticking retracts it</li>
+            <li>Choose what Claude searches by default: your sessions or the team's</li>
+            <li>Skip trivial and old sessions; pause sharing; add your own redaction patterns</li>
+            <li>Get notified when a scheduled sync fails</li>
+            <li>Redesigned settings, health view and toolbar; project picker replaces typing names</li>
             <li>MCP registration now covers every account, not just the active one</li>
             <li>Tag suggestions no longer save CLI warnings as tags</li>
         </ul>
