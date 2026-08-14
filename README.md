@@ -85,6 +85,19 @@ decide about X" from your own past work.
 - Requires **Python 3.11+** on the machine, and internet access on the first run only.
   (macOS ships 3.9, which is too old — the plugin detects that and says so.)
 
+How a question reaches your own history:
+
+```mermaid
+flowchart LR
+    T["Claude Code writes<br/>session transcripts"] -->|"scan + redact secrets"| C[("Local index<br/>SQLite + FTS5")]
+    C --> M["claude-sessions<br/>MCP server"]
+    M --> A["Claude answers from<br/>your past work"]
+    R["Daily re-index"] -.-> C
+```
+
+Nothing leaves the machine: the transcripts are only ever read, and the index is a file in
+your home directory.
+
 See [`mcp-server/README.md`](mcp-server/README.md) for the tools it exposes, the CLI, and
 what gets indexed.
 
@@ -95,6 +108,27 @@ session history syncs through a **private git repository** (one directory per pe
 project, so pushes can never conflict), and teammates' sessions are pulled back into your
 local search. Claude can then answer with `scope: team` — "what did anyone on the team
 decide about X", "who touched this file and why".
+
+```mermaid
+flowchart LR
+    subgraph you["Your machine"]
+        YC[("Your index")]
+    end
+    subgraph repo["Private git repo"]
+        R["One folder per person,<br/>per project"]
+    end
+    subgraph mate["Teammate's machine"]
+        MC[("Their index")]
+    end
+
+    YC -->|"export your sessions"| R
+    R -->|"import theirs"| YC
+    MC -->|"export their sessions"| R
+    R -->|"import yours"| MC
+```
+
+Because each person only ever writes inside their own folder, two people pushing at the
+same time can never conflict.
 
 - **Allowlisted projects only** — tick the projects to share; nothing else leaves the machine.
 - **Share with team** sits on every session's context menu, ticked by default. Untick one to
@@ -114,6 +148,37 @@ decide about X", "who touched this file and why".
   everything is secret-scanned again before each push.
 - **Stats → Health** shows whether the background jobs, per-account MCP registrations and
   supporting tools are actually working.
+
+Four gates decide whether a session ever leaves your machine — it has to pass all of them:
+
+```mermaid
+flowchart TD
+    S["A session"] --> P{"Project ticked<br/>in settings?"}
+    P -->|no| K["Stays on your machine"]
+    P -->|yes| T{"Shared with team?<br/>(context menu)"}
+    T -->|unticked| K
+    T -->|yes| F{"Long enough and<br/>recent enough?"}
+    F -->|no| K
+    F -->|yes| G{"Secret scan clean?"}
+    G -->|no| B["Push blocked"]
+    G -->|yes| E["Shared with the team"]
+```
+
+Untick **Share with team** on something already shared and the next run retracts it — the
+file is deleted and a tombstone removes it from teammates' indexes too.
+
+And what one scheduled run actually does:
+
+```mermaid
+flowchart LR
+    A["pull"] --> B["import<br/>teammates' sessions"]
+    B --> C["re-index<br/>your own"]
+    C --> D["export<br/>what qualifies"]
+    D --> E["secret scan"]
+    E --> F["push"]
+```
+
+Every step is safe to repeat, so a missed run just catches up at the next one.
 
 Point the settings at the repo URL and local path, confirm your id (prefilled from
 `git config user.email`), tick the projects to share, apply — cloning and scheduling
