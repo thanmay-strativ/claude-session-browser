@@ -19,7 +19,7 @@ builds 242–299.\* (so it loads in PyCharm 2026.2, Community and Professional).
   sort above the rest, then newest first.
 - Each row shows the session's title, then **relative time · model · message count ·
   git branch · tags**. The branch is always shown: it shortens
-  (`feature/VAY-3355-timetable` → `VAY-3355-timetable`) rather than disappearing.
+  (`feature/PROJ-1234-new-thing` → `PROJ-1234-new-thing`) rather than disappearing.
 - **Search matches title, first prompt, project, git branch and tags** — including the
   auto-derived ticket id. Tick **Content** to search inside the message text too.
 - Quick filters: All · Today · This week · Pinned · Untagged.
@@ -40,7 +40,7 @@ builds 242–299.\* (so it loads in PyCharm 2026.2, Community and Professional).
 ### Organise
 
 - Sessions **tag themselves**, free and instantly, with no AI call: the ticket id from the
-  branch (`#vay-3355`) plus topics from the title (`#bugfix`, `#tests`, `#migration`,
+  branch (`#proj-1234`) plus topics from the title (`#bugfix`, `#tests`, `#migration`,
   `#refactor`, `#review`, `#deploy`, `#ui`, `#api`, `#docs`, `#performance`, `#setup`,
   `#debug`).
 - Add your own tags by hand, or use **Suggest tags (AI)** for one session (a single cheap

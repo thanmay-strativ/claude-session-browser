@@ -186,7 +186,7 @@ justifications are:
 Tags are a first-class dimension, not decoration:
 
 - `branch:<name>` — every session tagged with its git branch
-- `<ticket>` — ticket id parsed out of the branch (`feature/VAY-4499-x` → `vay-4499`)
+- `<ticket>` — ticket id parsed out of the branch (`feature/PROJ-1234-x` → `proj-1234`)
 - `committed` — the session produced a git commit; SHAs, branch and subject are
   parsed out of `git commit` output in Bash tool results and stored separately
 - `subagent`, `pinned` — derived

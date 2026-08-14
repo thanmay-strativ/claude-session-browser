@@ -6,10 +6,10 @@
     <string>com.mahadi.claude-session-cache</string>
 
     <!-- The bundled install the plugin creates, so this keeps working without the
-         project checkout and without uv. Replace mahadi with your username. -->
+         project checkout and without uv. Replace YOUR_USERNAME with your own. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/mahadi/.claude-session-browser/mcp-server/.venv/bin/claude-session-cache</string>
+        <string>/Users/YOUR_USERNAME/.claude-session-browser/mcp-server/.venv/bin/claude-session-cache</string>
         <string>ingest</string>
     </array>
 
@@ -27,15 +27,15 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/mahadi/.claude-session-cache/ingest.log</string>
+    <string>/Users/YOUR_USERNAME/.claude-session-cache/ingest.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/mahadi/.claude-session-cache/ingest.error.log</string>
+    <string>/Users/YOUR_USERNAME/.claude-session-cache/ingest.error.log</string>
 
     <!-- uv needs a HOME to resolve its own cache and the project venv. -->
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
-        <string>/Users/mahadi</string>
+        <string>/Users/YOUR_USERNAME</string>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>

@@ -93,7 +93,7 @@ Total: ~4,700 lines Kotlin, ~1,700 lines Python.
 - **Play button at the row start** resumes the session without opening it. Its hit target
   is the leading 24px strip. See §7 for why it is leading and not trailing.
 - The **branch is never dropped**: it is drawn before tags and shortens
-  (`feature/VAY-3355-tour-timetable` → `VAY-3355-tour-timetable` → ellipsis) rather than
+  (`feature/PROJ-1234-new-thing` → `PROJ-1234-new-thing` → ellipsis) rather than
   disappearing. Tags fall off the end instead. Detached `HEAD` is shown, not hidden.
 - Row tooltip: first prompt (XML-escaped) + full branch + interaction hint.
 - Search matches **title, first prompt, project name, project path, git branch, and all
@@ -176,7 +176,7 @@ persisting them would freeze a branch's ticket id into a session that later move
 machine guesses into a curated list. So "Untagged" still means *you* haven't tagged it.
 
 - **Ticket id** from the branch, then title, then the first 60 chars of the prompt
-  (`feature/VAY-3355-timetable` → `#vay-3355`)
+  (`feature/PROJ-1234-new-thing` → `#proj-1234`)
 - **Topics** from the **title only**: bugfix, tests, migration, refactor, review, deploy,
   ui, api, docs, performance, setup, debug
 
@@ -467,7 +467,7 @@ against **real data** instead of assumed:
 
 Representative current numbers: 462 primary sessions · 70,518 messages indexed ·
 2,211 files touched · Bash 10,441 / Read 7,644 / Edit 5,999 calls ·
-`tour/views/tour_view.py` touched in 57 sessions.
+the most-revisited single file appeared in 57 sessions.
 
 ---
 

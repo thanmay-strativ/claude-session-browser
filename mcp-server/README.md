@@ -23,7 +23,7 @@ MCP tools, so Claude can answer "what did we decide about X" from your own histo
 Applied automatically on every ingest:
 
 - `branch:<name>` — the session's git branch
-- `<ticket>` — a ticket id parsed from the branch (`feature/VAY-4499-x` → `vay-4499`)
+- `<ticket>` — a ticket id parsed from the branch (`feature/PROJ-1234-x` → `proj-1234`)
 - `committed` — the session produced at least one git commit
 - `subagent` — the session is a subagent transcript
 - `pinned` — pinned in the PyCharm plugin
