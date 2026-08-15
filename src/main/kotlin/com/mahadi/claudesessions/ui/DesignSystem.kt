@@ -4,16 +4,21 @@ import com.intellij.ui.ColorUtil
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
+import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import java.awt.BasicStroke
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.awt.geom.Rectangle2D
 import java.util.Locale
 import javax.swing.Icon
@@ -330,6 +335,106 @@ internal class RoleBadge(
         } finally {
             canvas.dispose()
         }
+    }
+}
+
+/**
+ * A flat dropdown: the current value, a chevron, and a popup on click.
+ *
+ * Deliberately neither a `JComboBox` nor a `JButton`. The platform combo paints a tall native
+ * control with its own focus ring and arrow well, which is what made the toolbar row look
+ * bolted-together; and the macOS look-and-feel upper-cases `JButton` text — the trap that once
+ * turned a project name into "TOURBOOKER". Painting it here keeps these controls in the same
+ * chip language as the rest of the panel, identical in both themes.
+ */
+internal class DropdownChip(
+    text: String,
+    private val onOpen: (DropdownChip) -> Unit,
+) : JComponent() {
+
+    private var label: String = text
+    private var hovered = false
+    private var armed = false
+
+    private val horizontalPadding = JBUI.scale(9)
+    private val verticalPadding = JBUI.scale(5)
+    private val chevron = JBUI.scale(8)
+    private val gap = JBUI.scale(7)
+
+    init {
+        font = JBFont.label()
+        isOpaque = false
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseEntered(event: MouseEvent) = repaintWith { hovered = true }
+
+            override fun mouseExited(event: MouseEvent) = repaintWith { hovered = false; armed = false }
+
+            override fun mousePressed(event: MouseEvent) = repaintWith { armed = true }
+
+            override fun mouseReleased(event: MouseEvent) {
+                val wasArmed = armed
+                repaintWith { armed = false }
+                if (wasArmed && contains(event.point)) onOpen(this@DropdownChip)
+            }
+        })
+    }
+
+    private fun repaintWith(change: () -> Unit) {
+        change()
+        repaint()
+    }
+
+    fun setLabel(text: String) {
+        if (label == text) return
+        label = text
+        revalidate()
+        repaint()
+    }
+
+    override fun getPreferredSize(): Dimension {
+        val metrics = getFontMetrics(font)
+        return Dimension(
+            horizontalPadding * 2 + metrics.stringWidth(label) + gap + chevron,
+            metrics.height + verticalPadding * 2,
+        )
+    }
+
+    override fun getMinimumSize(): Dimension = preferredSize
+
+    override fun getMaximumSize(): Dimension = preferredSize
+
+    override fun paintComponent(graphics: Graphics) {
+        val canvas = Ui.antialiased(graphics.create())
+        try {
+            val radius = JBUI.scale(8)
+            canvas.color = when {
+                armed -> Ui.TRACK
+                hovered -> Ui.ACCENT_WASH
+                else -> Ui.CHIP_SURFACE
+            }
+            canvas.fillRoundRect(0, 0, width - 1, height - 1, radius, radius)
+            canvas.color = Ui.CARD_BORDER
+            canvas.drawRoundRect(0, 0, width - 1, height - 1, radius, radius)
+
+            canvas.font = font
+            val metrics = canvas.fontMetrics
+            canvas.color = Ui.ink
+            canvas.drawString(label, horizontalPadding, (height - metrics.height) / 2 + metrics.ascent)
+
+            paintChevron(canvas, width - horizontalPadding - chevron, height / 2)
+        } finally {
+            canvas.dispose()
+        }
+    }
+
+    private fun paintChevron(canvas: Graphics2D, left: Int, middle: Int) {
+        canvas.color = Ui.inkMuted
+        canvas.stroke = BasicStroke(JBUIScale.scale(1.3f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        val half = chevron / 2
+        val drop = JBUI.scale(2)
+        canvas.drawLine(left, middle - drop, left + half, middle + drop)
+        canvas.drawLine(left + half, middle + drop, left + chevron, middle - drop)
     }
 }
 

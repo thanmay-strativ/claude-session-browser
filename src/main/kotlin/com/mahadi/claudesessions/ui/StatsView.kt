@@ -325,7 +325,7 @@ private class StatsPanel(private val sessions: List<ClaudeSession>) : JBPanel<St
                 {
                     replaceSection(memorySection, "Claude memory (MCP)") {
                         if (stats == null) {
-                            memorySection.add(Ui.mutedRow("Couldn't read the cache — tick MCP in the panel to build it"))
+                            memorySection.add(Ui.mutedRow("Couldn't read the cache — turn on session search in Settings → General to build it"))
                         } else {
                             populateMemory(stats, registered)
                         }

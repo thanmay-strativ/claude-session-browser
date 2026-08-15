@@ -3,7 +3,6 @@ package com.mahadi.claudesessions.ui
 import com.intellij.icons.AllIcons
 import com.intellij.ide.actions.RevealFileAction
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.ide.CopyPasteManager
@@ -11,6 +10,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.DocumentAdapter
@@ -27,7 +27,6 @@ import com.mahadi.claudesessions.ClaudeEnvironment
 import com.mahadi.claudesessions.ClaudeSessionScanner
 import com.mahadi.claudesessions.ClaudeSessionVirtualFile
 import com.mahadi.claudesessions.ClaudeTranscriptReader
-import com.mahadi.claudesessions.McpRegistrationService
 import com.mahadi.claudesessions.McpRuntime
 import com.mahadi.claudesessions.SessionAutoTagger
 import com.mahadi.claudesessions.SessionDeleter
@@ -53,10 +52,8 @@ import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import javax.swing.DefaultComboBoxModel
 import javax.swing.JButton
 import javax.swing.JCheckBoxMenuItem
-import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPopupMenu
 import javax.swing.JScrollPane
@@ -134,25 +131,12 @@ class SessionBrowserPanel(
         isFocusable = false
         toolTipText = "Also search inside message text (slower)"
     }
-    private val filterCombo = JComboBox(SessionFilter.entries.toTypedArray()).apply {
-        isFocusable = false
-        font = font.deriveFont(font.size2D - 1f)
-        addActionListener { rebuildTree(searchField.text) }
-    }
-    private val environmentModel = DefaultComboBoxModel<ClaudeEnvironment>()
-    private val environmentCombo = JComboBox(environmentModel).apply {
-        isFocusable = false
-        font = font.deriveFont(font.size2D - 1f)
-        addActionListener { onEnvironmentSelected() }
-    }
+    private var activeFilter = SessionFilter.ALL
+    private val filterChip = DropdownChip(SessionFilter.ALL.toString()) { anchor -> showFilterPopup(anchor) }
+    private val environmentChip = DropdownChip("") { anchor -> showEnvironmentPopup(anchor) }
     private val refreshButton = JButton(AllIcons.Actions.Refresh).apply {
         isFocusable = false
         addActionListener { reload() }
-    }
-    private val mcpToggle = JBCheckBox("MCP").apply {
-        isFocusable = false
-        font = font.deriveFont(font.size2D - 1f)
-        addActionListener { toggleMcp() }
     }
     private val syncStrip = TeamSyncStatusStrip(project)
     private val autoRefreshTimer = Timer(AUTO_REFRESH_INTERVAL_MILLIS) {
@@ -161,7 +145,6 @@ class SessionBrowserPanel(
     private var allSessions: List<ClaudeSession> = emptyList()
     private var contentMatchIds: Set<String> = emptySet()
     private var searchGeneration = 0
-    private var suppressEnvironmentEvents = false
 
     init {
         background = UIUtil.getPanelBackground()
@@ -187,6 +170,10 @@ class SessionBrowserPanel(
      * at a different width from the icon buttons beside it, which is what made the previous
      * row look ragged. Every control on a row now shares one height, so the baseline runs
      * straight across.
+     *
+     * Content sits with the search field because it modifies the search, and nothing else is
+     * left on that side. Session search (MCP) is set up once and then forgotten, so it moved
+     * to Settings → General rather than holding a permanent seat in a narrow toolbar.
      */
     private fun buildToolbar(): JComponent {
         searchField.textEditor.emptyText.text = "Search title, branch, tag, project…"
@@ -214,32 +201,19 @@ class SessionBrowserPanel(
 
         val searchRow = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(6), 0)).apply {
             isOpaque = false
+            add(contentSearchCheckbox, BorderLayout.WEST)
             add(searchField, BorderLayout.CENTER)
             add(actions, BorderLayout.EAST)
         }
 
-        val checkboxes = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, JBUI.scale(8), 0)).apply {
+        val filterRow = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(7), 0)).apply {
             isOpaque = false
-            add(contentSearchCheckbox)
-            add(mcpToggle)
-        }
-
-        val filterRow = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(6), 0)).apply {
-            isOpaque = false
-            border = JBUI.Borders.emptyTop(6)
-            add(
-                JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
-                    isOpaque = false
-                    add(environmentCombo)
-                    add(filterCombo)
-                },
-                BorderLayout.WEST,
-            )
-            add(checkboxes, BorderLayout.EAST)
+            border = JBUI.Borders.emptyTop(7)
+            add(environmentChip)
+            add(filterChip)
         }
 
         refreshEnvironmentCombo()
-        refreshMcpToggleState()
 
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(6, 6, 2, 6)
@@ -340,29 +314,16 @@ class SessionBrowserPanel(
         reload()
     }
 
-    /**
-     * Rebuilds the environment dropdown from the store. Suppressed while repopulating so
-     * the model's own selection events aren't mistaken for the user switching account.
-     */
+    /** Repoints the account chip at whatever the store now holds — after settings, or a switch. */
     private fun refreshEnvironmentCombo() {
-        val environments = SessionMetadataStore.environments()
         val active = SessionMetadataStore.activeEnvironment()
-
-        suppressEnvironmentEvents = true
-        try {
-            environmentModel.removeAllElements()
-            environments.forEach(environmentModel::addElement)
-            environmentModel.selectedItem = environments.firstOrNull { it.name == active.name }
-                ?: environments.firstOrNull()
-        } finally {
-            suppressEnvironmentEvents = false
-        }
-        environmentCombo.isVisible = environments.isNotEmpty()
+        environmentChip.isVisible = SessionMetadataStore.environments().isNotEmpty()
+        environmentChip.setLabel(active.name)
         updateEnvironmentTooltips(active)
     }
 
     private fun updateEnvironmentTooltips(environment: ClaudeEnvironment) {
-        environmentCombo.toolTipText = "<html><b>${environment.name}</b><br>" +
+        environmentChip.toolTipText = "<html><b>${environment.name}</b><br>" +
             "Sessions: ${environment.sessionRoot}<br>" +
             "Binary: ${environment.claudeBinary ?: ClaudeBinaryLocator.resolve()}<br>" +
             "CLAUDE_CONFIG_DIR: ${environment.configDir ?: "default"}<br><br>" +
@@ -370,17 +331,41 @@ class SessionBrowserPanel(
         refreshButton.toolTipText = "Rescan ${environment.sessionRoot}"
     }
 
-    private fun onEnvironmentSelected() {
-        if (suppressEnvironmentEvents) return
-        val selected = environmentCombo.selectedItem as? ClaudeEnvironment ?: return
+    private fun showEnvironmentPopup(anchor: DropdownChip) {
+        val environments = SessionMetadataStore.environments()
+        if (environments.isEmpty()) return
+        JBPopupFactory.getInstance()
+            .createPopupChooserBuilder(environments)
+            .setTitle("Claude account")
+            .setSelectedValue(SessionMetadataStore.activeEnvironment(), true)
+            .setItemChosenCallback { chosen -> selectEnvironment(chosen) }
+            .createPopup()
+            .showUnderneathOf(anchor)
+    }
+
+    private fun selectEnvironment(selected: ClaudeEnvironment) {
         if (selected.name == SessionMetadataStore.activeEnvironment().name) return
 
         SessionMetadataStore.setActiveEnvironment(selected.name)
         searchField.text = ""
         contentMatchIds = emptySet()
+        environmentChip.setLabel(selected.name)
         updateEnvironmentTooltips(selected)
-        refreshMcpToggleState()
         reload()
+    }
+
+    private fun showFilterPopup(anchor: DropdownChip) {
+        JBPopupFactory.getInstance()
+            .createPopupChooserBuilder(SessionFilter.entries.toList())
+            .setTitle("Show")
+            .setSelectedValue(activeFilter, true)
+            .setItemChosenCallback { chosen ->
+                activeFilter = chosen
+                filterChip.setLabel(chosen.toString())
+                rebuildTree(searchField.text)
+            }
+            .createPopup()
+            .showUnderneathOf(anchor)
     }
 
     private fun applyAutoRefreshSetting() {
@@ -391,38 +376,6 @@ class SessionBrowserPanel(
         }
     }
 
-    private fun refreshMcpToggleState() {
-        mcpToggle.isEnabled = false
-        mcpToggle.toolTipText = "Checking MCP registration…"
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val registered = McpRegistrationService.isRegistered()
-            ApplicationManager.getApplication().invokeLater(
-                {
-                    mcpToggle.isSelected = registered
-                    mcpToggle.isEnabled = true
-                    mcpToggle.toolTipText = if (registered) {
-                        "Claude can search these sessions. Untick to remove the MCP server."
-                    } else {
-                        "Tick to let Claude search these sessions via the local cache (claude mcp add)."
-                    }
-                },
-                ModalityState.any(),
-            )
-        }
-    }
-
-    private fun toggleMcp() {
-        if (mcpToggle.isSelected) enableMcp() else disableMcp()
-    }
-
-    /**
-     * Brings an already-installed session cache up to this plugin build's version.
-     *
-     * Only the enable path ever installed the server, so someone who ticked MCP months ago kept
-     * running that month's Python — new queries the plugin asks for would just come back empty.
-     * Silent by design: nothing was broken and nothing is being asked of the user, so it reports
-     * only when it fails.
-     */
     /**
      * Moves an install from the old pair of launchd agents to the single merged job.
      *
@@ -435,6 +388,14 @@ class SessionBrowserPanel(
         }
     }
 
+    /**
+     * Brings an already-installed session cache up to this plugin build's version.
+     *
+     * Only the enable path ever installed the server, so someone who ticked MCP months ago kept
+     * running that month's Python — new queries the plugin asks for would just come back empty.
+     * Silent by design: nothing was broken and nothing is being asked of the user, so it reports
+     * only when it fails.
+     */
     private fun upgradeMcpIfStale() {
         if (!McpRuntime.isInstalled() || !McpRuntime.isStale()) {
             migrateScheduledAgent()
@@ -457,108 +418,6 @@ class SessionBrowserPanel(
                 if (failure == null) migrateScheduledAgent()
             }
         }.queue()
-    }
-
-    /**
-     * One click does the whole setup: unpack the bundled server, build its virtualenv,
-     * index the sessions, and register it with Claude Code. Runs under a progress
-     * indicator because the first run downloads dependencies.
-     */
-    private fun enableMcp() {
-        mcpToggle.isEnabled = false
-        object : Task.Backgroundable(project, "Setting up Claude session search", true) {
-            private var failure: String? = null
-            private var scheduled = false
-
-            override fun run(indicator: ProgressIndicator) {
-                indicator.isIndeterminate = true
-
-                if (!McpRuntime.isInstalled()) {
-                    val steps = McpRuntime.install { indicator.text = it }
-                    val failed = steps.firstOrNull { !it.ok }
-                    if (failed != null) {
-                        failure = "${failed.label} failed.\n\n${failed.detail}"
-                        return
-                    }
-                }
-                if (indicator.isCanceled) return
-
-                indicator.text = "Indexing your sessions…"
-                val (indexed, indexOutput) = McpRuntime.ingest()
-                if (!indexed) {
-                    failure = "Indexing failed.\n\n${indexOutput.takeLast(600)}"
-                    return
-                }
-                if (indicator.isCanceled) return
-
-                indicator.text = "Registering with Claude Code…"
-                val registration = McpRegistrationService.register()
-                if (!registration.success) {
-                    failure = "Registering with Claude Code failed.\n\n${registration.output}"
-                    return
-                }
-
-                indicator.text = "Scheduling daily refresh…"
-                scheduled = McpRuntime.installAgent(SessionMetadataStore.teamSync()).first
-            }
-
-            override fun onFinished() {
-                ApplicationManager.getApplication().invokeLater(
-                    {
-                        mcpToggle.isEnabled = true
-                        val message = failure
-                        if (message != null) {
-                            mcpToggle.isSelected = false
-                            Messages.showErrorDialog(project, message, "Couldn't Enable Session Search")
-                        } else {
-                            refreshMcpToggleState()
-                            val refreshNote = if (scheduled) {
-                                "The cache re-indexes itself daily."
-                            } else {
-                                "Automatic daily re-indexing could not be scheduled — " +
-                                    "ask Claude to run refresh_cache when you need it current."
-                            }
-                            Messages.showInfoMessage(
-                                project,
-                                "Claude can now search your past sessions.\n\n" +
-                                    "Restart any running Claude Code session to pick this up.\n" +
-                                    refreshNote,
-                                "Session Search Enabled",
-                            )
-                        }
-                    },
-                    ModalityState.any(),
-                )
-            }
-        }.queue()
-    }
-
-    private fun disableMcp() {
-        mcpToggle.isEnabled = false
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val result = McpRegistrationService.unregister()
-            if (result.success) {
-                // One agent serves both features now, so it may only go when team sync is off too.
-                val teamSync = SessionMetadataStore.teamSync()
-                if (teamSync.enabled) McpRuntime.installAgent(teamSync) else McpRuntime.removeAgent()
-            }
-            ApplicationManager.getApplication().invokeLater(
-                {
-                    mcpToggle.isEnabled = true
-                    if (!result.success) {
-                        mcpToggle.isSelected = true
-                        Messages.showErrorDialog(
-                            project,
-                            result.output.ifBlank { "The claude CLI reported a failure." },
-                            "Couldn't Remove MCP Server",
-                        )
-                        return@invokeLater
-                    }
-                    refreshMcpToggleState()
-                },
-                ModalityState.any(),
-            )
-        }
     }
 
     /**
@@ -800,7 +659,7 @@ class SessionBrowserPanel(
 
     private fun matchesQuickFilters(session: ClaudeSession): Boolean {
         val ageMillis = System.currentTimeMillis() - session.lastModifiedMillis
-        return when (filterCombo.selectedItem as? SessionFilter ?: SessionFilter.ALL) {
+        return when (activeFilter) {
             SessionFilter.ALL -> true
             SessionFilter.TODAY -> ageMillis <= 86_400_000L
             SessionFilter.THIS_WEEK -> ageMillis <= 604_800_000L

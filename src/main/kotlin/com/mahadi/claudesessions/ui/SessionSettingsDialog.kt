@@ -32,6 +32,7 @@ import com.intellij.util.ui.UIUtil
 import com.mahadi.claudesessions.CacheStatsService
 import com.mahadi.claudesessions.ClaudeEnvironment
 import com.mahadi.claudesessions.McpRuntime
+import com.mahadi.claudesessions.McpSetupService
 import com.mahadi.claudesessions.SessionMetadataStore
 import com.mahadi.claudesessions.SessionSettings
 import com.mahadi.claudesessions.TeamSyncConfig
@@ -83,7 +84,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         emptyText.text = "No environments"
     }
 
-    private val nameField = JBTextField()
+    private val nameField = JBTextField().apply { emptyText.text = "claude-work" }
 
     private val sessionRootField = TextFieldWithBrowseButton().apply {
         addBrowseFolderListener(
@@ -115,7 +116,9 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     private val syncEnabledCheckbox = JBCheckBox("Share my sessions with the team")
     private val pauseCheckbox = JBCheckBox("Pause sharing (keep receiving the team's sessions)")
     private val notifyCheckbox = JBCheckBox("Notify me when a scheduled sync fails")
-    private val repoUrlField = JBTextField()
+    private val repoUrlField = JBTextField().apply {
+        emptyText.text = "git@github.com:acme/claude-knowledge-base.git"
+    }
     private val repoPathField = TextFieldWithBrowseButton().apply {
         addBrowseFolderListener(
             project,
@@ -124,7 +127,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 .withDescription("Local clone of the team's private knowledge-base repo"),
         )
     }
-    private val ownerField = JBTextField()
+    private val ownerField = JBTextField().apply { emptyText.text = "you@company.com" }
     private val scopeCombo = JComboBox(arrayOf(SCOPE_MINE_LABEL, SCOPE_TEAM_LABEL))
     private val projectList = CheckBoxList<String>().apply {
         setCheckBoxListListener { _, _ -> updateProjectsSummary() }
@@ -154,13 +157,24 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         lineWrap = false
         font = JBFont.small()
     }
-    private val syncHoursField = JBTextField()
+    private val syncHoursField = JBTextField().apply { emptyText.text = "9, 18" }
     private val statusBanner = StatusBanner()
 
     private val autoRefreshCheckbox = JBCheckBox(
         "Auto-refresh the session list every ${SessionSettings.autoRefreshSeconds()}s",
         SessionSettings.isAutoRefreshEnabled(),
     )
+
+    /**
+     * Session search is set up once and then forgotten, which is why it lives here rather than
+     * holding a permanent seat in the toolbar. It applies immediately instead of on Apply: the
+     * work behind it is a long, cancellable install with its own progress and dialogs, not a
+     * value to be written when the form closes.
+     */
+    private val mcpCheckbox = JBCheckBox("Let Claude search my past sessions").apply {
+        isEnabled = false
+        addActionListener { toggleMcp() }
+    }
 
     private var editing: EditableEnvironment? = null
     private var activeEnvironment: EditableEnvironment? = null
@@ -175,6 +189,21 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         init()
         prefillOwnerFromGit()
         loadKnownProjectsAsync()
+        McpSetupService.isRegisteredAsync { registered -> settleMcpCheckbox(registered) }
+    }
+
+    private fun toggleMcp() {
+        mcpCheckbox.isEnabled = false
+        if (mcpCheckbox.isSelected) {
+            McpSetupService.enable(project) { enabled -> settleMcpCheckbox(enabled) }
+        } else {
+            McpSetupService.disable(project) { enabled -> settleMcpCheckbox(enabled) }
+        }
+    }
+
+    private fun settleMcpCheckbox(enabled: Boolean) {
+        mcpCheckbox.isSelected = enabled
+        mcpCheckbox.isEnabled = true
     }
 
     private fun loadEnvironments() {
@@ -369,7 +398,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     }
 
     override fun createCenterPanel(): JComponent = JBTabbedPane().apply {
-        preferredSize = Dimension(JBUI.scale(660), JBUI.scale(580))
+        preferredSize = Dimension(JBUI.scale(660), JBUI.scale(620))
         addTab("Environments", scrollable(environmentsTab()))
         addTab("Team Sync", scrollable(teamSyncTab()))
         addTab("General", scrollable(generalTab()))
@@ -414,12 +443,13 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
             add(divider())
             add(
                 section("Selected account", null) {
-                    add(field("Name", nameField, "Shown in the toolbar dropdown, e.g. claude or claude-work."))
+                    add(field("Name", nameField, "Shown in the account dropdown in the panel.", "claude-work"))
                     add(
                         field(
                             "Session directory",
                             sessionRootField,
                             "Where this account's transcripts are read from.",
+                            "~/.claude/projects",
                         )
                     )
                     add(
@@ -428,6 +458,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                             configDirField,
                             "Passed as CLAUDE_CONFIG_DIR when resuming or tagging — this is what makes " +
                                 "a second account work off one binary. Blank for the default account.",
+                            "~/.claude-work",
                         )
                     )
                     add(
@@ -435,6 +466,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                             "Claude executable",
                             claudeBinaryField,
                             "Only needed if this account has its own install. Leave blank to auto-detect.",
+                            "/opt/homebrew/bin/claude",
                         )
                     )
                 }
@@ -450,8 +482,18 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 "Shares redacted session history through a private git repository and pulls the " +
                     "team's back, so Claude can answer \"what did anyone decide about X\".",
             ) {
-                add(checkboxRow(syncEnabledCheckbox))
-                add(checkboxRow(pauseCheckbox))
+                add(
+                    checkboxRow(
+                        syncEnabledCheckbox,
+                        "Exports the projects you tick below and pulls in whatever teammates have shared.",
+                    )
+                )
+                add(
+                    checkboxRow(
+                        pauseCheckbox,
+                        "A temporary hold: yours stop being published, the team's keep arriving.",
+                    )
+                )
             }
         )
         add(divider())
@@ -462,6 +504,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                         "Repository URL",
                         repoUrlField,
                         "The private repo's git URL. Used to clone when the local path does not exist yet.",
+                        "git@github.com:acme/claude-knowledge-base.git",
                     )
                 )
                 add(
@@ -469,6 +512,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                         "Local path",
                         repoPathField,
                         "Where the repo lives (or should be cloned to) on this machine.",
+                        "~/claude-knowledge-base",
                     )
                 )
                 add(
@@ -477,6 +521,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                         ownerField,
                         "How teammates see your sessions — your work email is the convention. " +
                             "Prefilled from git config user.email.",
+                        "you@company.com",
                     )
                 )
             }
@@ -493,6 +538,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                         "Projects",
                         projectsField,
                         "Open the list and tick the projects to share. Drawn from your indexed history.",
+                        "tourbooker, billing-api",
                     )
                 )
                 add(
@@ -542,6 +588,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                         },
                         "One regular expression per line — internal hostnames, customer names. " +
                             "Matches are replaced before export; changing these re-exports affected sessions.",
+                        "acme-internal\\.com   ·   CUST-\\d{6}",
                     )
                 )
                 add(checkboxRow(notifyCheckbox))
@@ -555,6 +602,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                         "Sync at (hours)",
                         syncHoursField,
                         "Comma-separated hours, 0-23. A missed run catches up at the next login.",
+                        "9, 18",
                     )
                 )
             }
@@ -562,6 +610,23 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     }
 
     private fun generalTab(): JComponent = tabPanel {
+        add(
+            section(
+                "Claude's session search",
+                "Indexes your history into a local database so Claude can answer \"what did we " +
+                    "decide about X\" from your own past work. Nothing leaves this machine.",
+            ) {
+                add(
+                    checkboxRow(
+                        mcpCheckbox,
+                        "Registers a local MCP server with Claude Code and keeps the index current. " +
+                            "Needs Python 3.11 or newer, and internet access on the first run only. " +
+                            "Restart any running Claude Code session afterwards.",
+                    )
+                )
+            }
+        )
+        add(divider())
         add(
             section("Session list", "Preferences for the panel itself.") {
                 add(checkboxRow(autoRefreshCheckbox))
@@ -624,13 +689,52 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         }
     }
 
-    private fun checkboxRow(checkbox: JBCheckBox): JComponent =
-        JBPanel<JBPanel<*>>(BorderLayout()).apply {
+    /** A switch, optionally with the one line that says what turning it on actually does. */
+    private fun checkboxRow(checkbox: JBCheckBox, hint: String? = null): JComponent =
+        JBPanel<JBPanel<*>>().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
-            border = JBUI.Borders.emptyTop(8)
-            maximumSize = Dimension(Int.MAX_VALUE, checkbox.preferredSize.height + JBUI.scale(8))
-            add(checkbox, BorderLayout.WEST)
+            border = JBUI.Borders.emptyTop(10)
+            add(
+                JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                    isOpaque = false
+                    alignmentX = Component.LEFT_ALIGNMENT
+                    maximumSize = Dimension(Int.MAX_VALUE, checkbox.preferredSize.height)
+                    add(checkbox, BorderLayout.WEST)
+                }
+            )
+            if (hint != null) add(hintLabel(hint, indent = JBUI.scale(22)))
+        }
+
+    private fun hintLabel(text: String, indent: Int = 0): JComponent =
+        JBLabel(wrapped(text)).apply {
+            foreground = Ui.inkMuted
+            font = JBFont.small()
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = JBUI.Borders.empty(2, indent, 0, 0)
+        }
+
+    /**
+     * A worked example under a field.
+     *
+     * Kept as its own row rather than folded into the hint: the hint explains what the field is
+     * for, the example shows what a correct value looks like, and running the two together in one
+     * grey paragraph is what made this form read as a wall of text.
+     */
+    private fun exampleRow(example: String): JComponent =
+        JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = JBUI.Borders.empty(4, 0, 0, 0)
+            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(24))
+            add(Chip("Example"))
+            add(
+                JBLabel(example).apply {
+                    font = JBFont.small()
+                    foreground = Ui.inkMuted
+                }
+            )
         }
 
     /** A number input that reads as a sentence: "Skip sessions under [3] messages". */
@@ -660,15 +764,16 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
             )
         }
 
-    private fun field(label: String, editor: JComponent, hint: String): JComponent =
+    private fun field(label: String, editor: JComponent, hint: String, example: String? = null): JComponent =
         JBPanel<JBPanel<*>>().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
-            border = JBUI.Borders.emptyTop(10)
+            border = JBUI.Borders.emptyTop(14)
             add(JBLabel(label).apply {
                 font = JBFont.label().asBold()
                 alignmentX = Component.LEFT_ALIGNMENT
+                border = JBUI.Borders.emptyBottom(4)
             })
             add(
                 editor.apply {
@@ -678,12 +783,8 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                     }
                 }
             )
-            add(JBLabel(wrapped(hint)).apply {
-                foreground = Ui.inkMuted
-                font = JBFont.small()
-                alignmentX = Component.LEFT_ALIGNMENT
-                border = JBUI.Borders.emptyTop(2)
-            })
+            add(hintLabel(hint))
+            if (example != null) add(exampleRow(example))
         }
 
     /**
@@ -817,8 +918,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
 
         if (!McpRuntime.isInstalled()) {
             return ValidationInfo(
-                "Enable Claude session search (the MCP toggle in the panel toolbar) first — " +
-                    "team sync runs on the same engine.",
+                "Turn on Claude's session search under General first — team sync runs on the same engine.",
                 syncEnabledCheckbox,
             )
         }

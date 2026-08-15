@@ -47,7 +47,8 @@ object HealthCheckService {
             null -> Check(
                 label,
                 State.PROBLEM,
-                "The agent file exists but launchd has not loaded it — re-enable MCP to reload it.",
+                "The agent file exists but launchd has not loaded it — re-apply session search " +
+                    "in Settings → General to reload it.",
             )
             0 -> Check(label, State.OK, "${scheduleSummary()}${lastActivitySuffix(cacheFile("refresh.log"))}.")
             else -> Check(
@@ -135,7 +136,7 @@ object HealthCheckService {
         !McpRuntime.isInstalled() -> Check(
             "Session cache engine",
             State.PROBLEM,
-            "Not installed — tick MCP in the panel toolbar to set it up.",
+            "Not installed — turn on session search in Settings → General.",
         )
         McpRuntime.isStale() -> Check(
             "Session cache engine",
@@ -153,7 +154,8 @@ object HealthCheckService {
                 Check(
                     "MCP · ${account.environmentName}",
                     State.PROBLEM,
-                    "Not registered for this account — tick MCP in the panel toolbar to register all accounts.",
+                    "Not registered for this account — re-apply session search in " +
+                        "Settings → General to register every account.",
                 )
             }
         }

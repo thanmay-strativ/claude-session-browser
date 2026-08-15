@@ -22,7 +22,8 @@ builds 242–299.\* (so it loads in PyCharm 2026.2, Community and Professional).
   (`feature/PROJ-1234-new-thing` → `PROJ-1234-new-thing`) rather than disappearing.
 - **Search matches title, first prompt, project, git branch and tags** — including the
   auto-derived ticket id. Tick **Content** to search inside the message text too.
-- Quick filters: All · Today · This week · Pinned · Untagged.
+- Quick filters: All · Today · This week · Pinned · Untagged, from a dropdown beside the
+  account picker. **Content** sits with the search field, since that is what it modifies.
 
 ### Read and resume
 
@@ -75,7 +76,8 @@ cannot be launched as a program.
 
 ### Optional: let Claude search your sessions (MCP)
 
-Tick **MCP** in the panel. One click extracts the bundled `claude-session-cache` server,
+Tick **Settings → General → Let Claude search my past sessions**. One click extracts the
+bundled `claude-session-cache` server,
 builds it an isolated environment, indexes your history into SQLite + FTS5, registers it
 with Claude Code, and schedules a daily re-index. Claude can then answer "what did we
 decide about X" from your own past work.

@@ -56,6 +56,9 @@
             <li>MCP registration now covers every account, not just the active one</li>
             <li>Tag suggestions no longer save CLI warnings as tags</li>
             <li>One background job instead of two: the sync already re-indexes, so it no longer runs twice — and macOS lists a single item</li>
+            <li>Session search moved from the toolbar to Settings → General; Content now sits with the search field</li>
+            <li>Account and filter pickers redrawn as flat dropdowns instead of native combo boxes</li>
+            <li>Settings fields carry a worked example, and each switch says what it does</li>
         </ul>
         <h4>1.1.19</h4>
         <ul>

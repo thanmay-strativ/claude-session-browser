@@ -157,7 +157,8 @@ only those two keys and stay ignorant of environments entirely.
 
 ### 3.5 MCP session search
 
-One tick of **MCP** does everything: extract the bundled server, find a suitable Python
+One tick of **Settings → General → session search** does everything: extract the bundled
+server, find a suitable Python
 (probed, not assumed — macOS ships 3.9 which is too old), create a venv, install the
 package, index the history, register with Claude Code, and schedule a refresh via a launchd
 agent generated from *this* machine's paths (never a checked-in plist carrying someone's
