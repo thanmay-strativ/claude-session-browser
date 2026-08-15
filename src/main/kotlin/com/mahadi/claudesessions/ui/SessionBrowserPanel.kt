@@ -15,7 +15,6 @@ import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.SearchTextField
-import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
@@ -44,6 +43,7 @@ import java.awt.FlowLayout
 import java.awt.FontMetrics
 import java.awt.Graphics
 import java.awt.Graphics2D
+import java.awt.GridBagLayout
 import java.awt.datatransfer.StringSelection
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
@@ -127,9 +127,9 @@ class SessionBrowserPanel(
     private val tree = Tree(treeModel)
     private val cellRenderer = SessionRowRenderer()
     private val searchField = SearchTextField()
-    private val contentSearchCheckbox = JBCheckBox("Content").apply {
-        isFocusable = false
-        toolTipText = "Also search inside message text (slower)"
+    private val searchEverythingToggle = ToggleChip("All") { onSearchChanged() }.apply {
+        toolTipText = "Search everything, including the text of every message (slower). " +
+            "Off, the search covers titles, prompts, projects, branches and tags."
     }
     private var activeFilter = SessionFilter.ALL
     private val filterChip = DropdownChip(SessionFilter.ALL.toString()) { anchor -> showFilterPopup(anchor) }
@@ -171,18 +171,19 @@ class SessionBrowserPanel(
      * row look ragged. Every control on a row now shares one height, so the baseline runs
      * straight across.
      *
-     * Content sits with the search field because it modifies the search, and nothing else is
-     * left on that side. Session search (MCP) is set up once and then forgotten, so it moved
-     * to Settings → General rather than holding a permanent seat in a narrow toolbar.
+     * The All toggle sits with the search field because it widens the search — and it is a chip
+     * rather than a labelled checkbox because the checkbox cost twice the width for the same
+     * one-bit answer, which is what left this row too tight in a narrow tool window. Session
+     * search (MCP) is set up once and then forgotten, so it moved to Settings → General rather
+     * than holding a permanent seat here.
      */
     private fun buildToolbar(): JComponent {
         searchField.textEditor.emptyText.text = "Search title, branch, tag, project…"
         searchField.toolTipText = "Matches the title, opening message, project, git branch and " +
-            "tags (including the auto-derived ticket id). Tick Content to search message text too."
+            "tags (including the auto-derived ticket id). Turn on All to search message text too."
         searchField.addDocumentListener(object : DocumentAdapter() {
             override fun textChanged(event: DocumentEvent) = onSearchChanged()
         })
-        contentSearchCheckbox.addActionListener { onSearchChanged() }
 
         val stats = toolbarButton(BarChartIcon, "Session statistics and health") {
             StatsDialog(project, allSessions).show()
@@ -199,9 +200,17 @@ class SessionBrowserPanel(
             add(refreshButton)
         }
 
-        val searchRow = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(6), 0)).apply {
+        val searchRow = JBPanel<JBPanel<*>>(BorderLayout(JBUI.scale(5), 0)).apply {
             isOpaque = false
-            add(contentSearchCheckbox, BorderLayout.WEST)
+            add(
+                // Wrapped so the chip keeps its own height instead of being stretched to the
+                // search field's by BorderLayout.
+                JBPanel<JBPanel<*>>(GridBagLayout()).apply {
+                    isOpaque = false
+                    add(searchEverythingToggle)
+                },
+                BorderLayout.WEST,
+            )
             add(searchField, BorderLayout.CENTER)
             add(actions, BorderLayout.EAST)
         }
@@ -670,7 +679,7 @@ class SessionBrowserPanel(
 
     private fun triggerContentSearch(rawFilter: String?) {
         val filter = rawFilter?.trim().orEmpty()
-        if (!contentSearchCheckbox.isSelected || filter.length < 2) return
+        if (!searchEverythingToggle.isSelected || filter.length < 2) return
 
         val generation = ++searchGeneration
         val sessionsSnapshot = allSessions

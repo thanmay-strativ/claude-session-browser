@@ -98,7 +98,7 @@ Total: ~4,700 lines Kotlin, ~1,700 lines Python.
   disappearing. Tags fall off the end instead. Detached `HEAD` is shown, not hidden.
 - Row tooltip: first prompt (XML-escaped) + full branch + interaction hint.
 - Search matches **title, first prompt, project name, project path, git branch, and all
-  tags** (manual + derived). Tick **Content** to also grep message text (slower, threaded,
+  tags** (manual + derived). Turn on **All** to also grep message text (slower, threaded,
   generation-counted so stale results are discarded).
 - Filters: All / Today / This week / Pinned / Untagged.
 - Context menu: open, continue, rename, reset title, edit tags, suggest tags (AI), pin,

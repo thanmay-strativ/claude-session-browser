@@ -59,6 +59,8 @@
             <li>Session search moved from the toolbar to Settings → General; Content now sits with the search field</li>
             <li>Account and filter pickers redrawn as flat dropdowns instead of native combo boxes</li>
             <li>Settings fields carry a worked example, and each switch says what it does</li>
+            <li>"Content" is now an "All" toggle that fits the toolbar, so the search field and buttons stop being squeezed</li>
+            <li>The projects dropdown is sized to its contents instead of opening as a tall, mostly empty box</li>
         </ul>
         <h4>1.1.19</h4>
         <ul>

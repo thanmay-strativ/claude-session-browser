@@ -71,6 +71,9 @@ private const val SCOPE_TEAM_LABEL = "The whole team's sessions"
 /** CSS px for wrapping hint text; see [SessionSettingsDialog.wrapped] for why it is not scaled. */
 private const val HINT_WRAP_WIDTH = 440
 
+/** Past this the project popup scrolls rather than growing taller than the dialog. */
+private const val MAX_VISIBLE_PROJECT_ROWS = 9
+
 /**
  * The plugin's settings: Claude environments, team knowledge-base sync, and general
  * preferences — one tab each, every tab built from titled cards rather than a flat run of
@@ -275,9 +278,12 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     private fun showProjectsPopup() {
         if (projectList.itemsCount == 0) return
         val scrollPane = JBScrollPane(projectList).apply {
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            // Sized to what is actually in the list. A fixed height left three projects
+            // floating at the top of a tall, empty box that covered the fields below it.
             preferredSize = Dimension(
                 maxOf(projectsField.width, JBUI.scale(320)),
-                JBUI.scale(240),
+                projectsPopupHeight(),
             )
         }
         JBPopupFactory.getInstance()
@@ -288,6 +294,15 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
             .setCancelOnClickOutside(true)
             .createPopup()
             .showUnderneathOf(projectsField)
+    }
+
+    private fun projectsPopupHeight(): Int {
+        // The list has not been laid out when the popup is first built, so its own row height can
+        // come back missing or nonsensically small; the floor keeps the popup usable either way.
+        val measured = projectList.getCellBounds(0, 0)?.height ?: 0
+        val rowHeight = maxOf(measured, JBUI.scale(24))
+        val rows = projectList.itemsCount.coerceAtMost(MAX_VISIBLE_PROJECT_ROWS)
+        return rowHeight * rows + JBUI.scale(8)
     }
 
     private fun updateProjectsSummary() {

@@ -21,9 +21,9 @@ builds 242–299.\* (so it loads in PyCharm 2026.2, Community and Professional).
   git branch · tags**. The branch is always shown: it shortens
   (`feature/PROJ-1234-new-thing` → `PROJ-1234-new-thing`) rather than disappearing.
 - **Search matches title, first prompt, project, git branch and tags** — including the
-  auto-derived ticket id. Tick **Content** to search inside the message text too.
+  auto-derived ticket id. Turn on **All** to search inside the message text too.
 - Quick filters: All · Today · This week · Pinned · Untagged, from a dropdown beside the
-  account picker. **Content** sits with the search field, since that is what it modifies.
+  account picker. The **All** toggle sits with the search field, since that is what it widens.
 
 ### Read and resume
 

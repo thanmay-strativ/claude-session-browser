@@ -438,6 +438,107 @@ internal class DropdownChip(
     }
 }
 
+/**
+ * An on/off chip, sized for a toolbar that has no room to spare.
+ *
+ * A labelled `JBCheckBox` cost about twice the width for the same one-bit answer, and in a
+ * narrow tool window that was enough to squeeze the search field and crowd the buttons beside
+ * it. On is carried by the fill and the border rather than by a tick, so the state reads at a
+ * glance from across the panel — with the glyph, so colour is never the only signal.
+ */
+internal class ToggleChip(
+    private val label: String,
+    private val onToggle: (Boolean) -> Unit,
+) : JComponent() {
+
+    var isSelected: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            repaint()
+        }
+
+    private var hovered = false
+
+    private val horizontalPadding = JBUI.scale(8)
+    private val verticalPadding = JBUI.scale(5)
+    private val glyph = JBUI.scale(9)
+    private val gap = JBUI.scale(5)
+
+    init {
+        font = JBFont.label()
+        isOpaque = false
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseEntered(event: MouseEvent) {
+                hovered = true
+                repaint()
+            }
+
+            override fun mouseExited(event: MouseEvent) {
+                hovered = false
+                repaint()
+            }
+
+            override fun mouseReleased(event: MouseEvent) {
+                if (!contains(event.point)) return
+                isSelected = !isSelected
+                onToggle(isSelected)
+            }
+        })
+    }
+
+    override fun getPreferredSize(): Dimension {
+        val metrics = getFontMetrics(font)
+        return Dimension(
+            horizontalPadding * 2 + glyph + gap + metrics.stringWidth(label),
+            metrics.height + verticalPadding * 2,
+        )
+    }
+
+    override fun getMinimumSize(): Dimension = preferredSize
+
+    override fun getMaximumSize(): Dimension = preferredSize
+
+    override fun paintComponent(graphics: Graphics) {
+        val canvas = Ui.antialiased(graphics.create())
+        try {
+            val radius = JBUI.scale(8)
+            canvas.color = when {
+                isSelected -> Ui.ACCENT_WASH
+                hovered -> Ui.TRACK
+                else -> Ui.CHIP_SURFACE
+            }
+            canvas.fillRoundRect(0, 0, width - 1, height - 1, radius, radius)
+            canvas.color = if (isSelected) Ui.ACCENT else Ui.CARD_BORDER
+            canvas.drawRoundRect(0, 0, width - 1, height - 1, radius, radius)
+
+            paintGlyph(canvas, horizontalPadding, height / 2)
+
+            canvas.font = font
+            val metrics = canvas.fontMetrics
+            canvas.color = if (isSelected) Ui.ink else Ui.inkMuted
+            canvas.drawString(
+                label,
+                horizontalPadding + glyph + gap,
+                (height - metrics.height) / 2 + metrics.ascent,
+            )
+        } finally {
+            canvas.dispose()
+        }
+    }
+
+    /** Three stacked rules — "everything in here", including the message text. */
+    private fun paintGlyph(canvas: Graphics2D, left: Int, middle: Int) {
+        canvas.color = if (isSelected) Ui.ACCENT else Ui.inkMuted
+        val thickness = maxOf(1, JBUI.scale(1))
+        val step = JBUI.scale(3)
+        canvas.fillRect(left, middle - step - thickness, glyph, thickness)
+        canvas.fillRect(left, middle - thickness / 2, glyph, thickness)
+        canvas.fillRect(left, middle + step, if (isSelected) glyph else glyph * 2 / 3, thickness)
+    }
+}
+
 /** A pill badge: quiet metadata that stays readable without shouting like a coloured word. */
 internal class Chip(
     private val text: String,
