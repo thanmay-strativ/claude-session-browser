@@ -32,11 +32,11 @@ one source of truth, copied in at build time.
 | What | Path |
 |---|---|
 | Extracted MCP server | `~/.claude-session-browser/mcp-server` |
-| Its venv entry points | `.venv/bin/claude-session-cache` (index, serve, stats) and `.venv/bin/claude-session-sync` (team sync — a separate name only so macOS lists the two launchd agents distinctly) |
+| Its venv entry point | `~/.claude-session-browser/mcp-server/.venv/bin/claude-session-cache` |
 | Bundle fingerprint | `~/.claude-session-browser/mcp-server/.bundle-version` |
 | Cache database | `~/.claude-session-cache/sessions.db` |
 | Titles / pins / tags / environments | `~/.claude-session-browser/metadata.json` |
-| Daily refresh agent | `~/Library/LaunchAgents/com.mahadi.claude-session-cache.plist` |
+| Scheduled job (indexes, and syncs when configured) | `~/Library/LaunchAgents/com.mahadi.claude-session-cache.plist` |
 | Claude transcripts (read-only) | `<configDir>/projects/*/*.jsonl` |
 
 Plain JSON for the metadata is deliberate: both the Kotlin plugin and the Python package
@@ -159,9 +159,16 @@ only those two keys and stay ignorant of environments entirely.
 
 One tick of **MCP** does everything: extract the bundled server, find a suitable Python
 (probed, not assumed — macOS ships 3.9 which is too old), create a venv, install the
-package, index the history, register with Claude Code, and schedule a daily refresh at
-03:00 via a launchd agent generated from *this* machine's paths (never a checked-in plist
-carrying someone's username). Un-ticking unregisters and removes the agent.
+package, index the history, register with Claude Code, and schedule a refresh via a launchd
+agent generated from *this* machine's paths (never a checked-in plist carrying someone's
+username). Un-ticking unregisters, and removes the agent unless team sync still needs it.
+
+There is exactly **one** launchd agent, running `claude-session-cache refresh`. It syncs when
+team sync is configured — a cycle that ingests before it exports — and otherwise only ingests,
+so the work is never scheduled twice. The schedule follows that split: the configured sync
+hours when sharing is on, a single 03:00 pass when it is not. `McpRuntime.reconcileAgent`
+migrates installs from the retired two-agent layout, and rewrites nothing when the plist
+already matches, because reloading an agent fires `RunAtLoad`.
 
 Both accounts' sessions accumulate in one database, but **every query is scoped to the
 selected account** via each session's `source_root` column. Pass `all_accounts=true` to
@@ -412,7 +419,7 @@ itself. `since-build`/`until-build` in the descriptor should track `build.gradle
 | 1.1.17 | Daily activity chart; week-on-week change; active days; heaviest sessions; files you return to; commits + cache freshness; housekeeping; filler tiles dropped; **session cache self-updates** |
 | 1.1.18 | Tool use split, MCP tools grouped by server |
 | 1.1.19 | Branch always visible on a row; shortens instead of disappearing; detached `HEAD` shown |
-| 1.2.0 | **Team knowledge base**: schema v4 `owner` column; `export`/`import`/`sync` CLI (per-session JSONL in a private git repo, tombstones retract held-back sessions); `scope` on the MCP search tools plus a configurable default; twice-daily launchd sync agent; sync status strip with countdown; "Share with team" per session; export filters (min messages, max age), pause, custom redaction patterns, failure notifications; redesigned settings/health/toolbar; MCP registration covers every account; auto-tagger stdin/stderr fix |
+| 1.2.0 | **Team knowledge base**: schema v4 `owner` column; `export`/`import`/`sync` CLI (per-session JSONL in a private git repo, tombstones retract held-back sessions); `scope` on the MCP search tools plus a configurable default; one launchd agent (`refresh`) doing both indexing and sync; sync status strip with countdown; "Share with team" per session; export filters (min messages, max age), pause, custom redaction patterns, failure notifications; redesigned settings/health/toolbar; MCP registration covers every account; auto-tagger stdin/stderr fix |
 
 ---
 

@@ -55,7 +55,7 @@
             <li>Redesigned settings, health view and toolbar; project picker replaces typing names</li>
             <li>MCP registration now covers every account, not just the active one</li>
             <li>Tag suggestions no longer save CLI warnings as tags</li>
-            <li>The scheduled sync runs under its own name, so macOS no longer lists two identical background items</li>
+            <li>One background job instead of two: the sync already re-indexes, so it no longer runs twice — and macOS lists a single item</li>
         </ul>
         <h4>1.1.19</h4>
         <ul>

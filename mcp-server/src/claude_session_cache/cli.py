@@ -1,4 +1,4 @@
-"""Command line entry point: `ingest`, `serve`, `stats`, `export`, `import` and `sync`."""
+"""Command line entry point: `ingest`, `serve`, `stats`, `export`, `import`, `sync` and `refresh`."""
 
 from __future__ import annotations
 
@@ -49,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     _add_sync_arguments(import_parser)
 
     subparsers.add_parser("sync", help="full cycle: pull, import, ingest, export, secret-scan, push")
+    subparsers.add_parser(
+        "refresh", help="what the scheduled job runs: sync when it is configured, otherwise ingest"
+    )
 
     args = parser.parse_args(argv)
 
@@ -116,12 +119,18 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(stats.as_dict(), indent=2))
         return 0 if all(step.get("ok") for step in stats.steps) else 1
 
+    if args.command == "refresh":
+        from .sync import run_sync
+
+        if not load_team_sync().is_usable():
+            print(json.dumps(ingest(connection).as_dict(), indent=2))
+            return 0
+
+        stats = run_sync(connection)
+        print(json.dumps(stats.as_dict(), indent=2))
+        return 0 if all(step.get("ok") for step in stats.steps) else 1
+
     return 1
-
-
-def sync_main() -> int:
-    """Console script for the scheduled team sync, so macOS lists it under its own name."""
-    return main([*sys.argv[1:], "sync"])
 
 
 def _add_sync_arguments(subparser: argparse.ArgumentParser) -> None:

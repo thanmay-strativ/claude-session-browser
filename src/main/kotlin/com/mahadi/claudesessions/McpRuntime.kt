@@ -9,13 +9,20 @@ private val LOG = logger<McpRuntime>()
 
 private const val SETUP_TIMEOUT_SECONDS = 300L
 
-internal const val REFRESH_AGENT_LABEL = "com.mahadi.claude-session-cache"
-private const val REFRESH_HOUR = 3
+internal const val AGENT_LABEL = "com.mahadi.claude-session-cache"
 
-internal const val SYNC_AGENT_LABEL = "com.mahadi.claude-session-sync"
+/**
+ * Retired. The team sync used to be scheduled as a second agent, which meant indexing ran twice
+ * over — the sync cycle already ingests before it exports. One agent now does both, so an upgrade
+ * has to unload the old one or it keeps firing against a plist nothing maintains.
+ */
+private const val LEGACY_SYNC_AGENT_LABEL = "com.mahadi.claude-session-sync"
+
+/** With no team sync configured the job only indexes, so it runs once, out of the way. */
+private const val INDEX_ONLY_HOUR = 3
 
 /** launchd gives agents a bare PATH; the sync cycle shells out to git and (if present) gitleaks. */
-private const val SYNC_AGENT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+private const val AGENT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 /** Must match `requires-python` in the bundled pyproject.toml. */
 private const val MIN_PYTHON_MAJOR = 3
@@ -41,21 +48,6 @@ object McpRuntime {
 
     /** The console script the MCP registration and the stats reader both invoke. */
     val executable: File get() = File(venvDir, "bin/claude-session-cache")
-
-    /**
-     * How to run one sync cycle.
-     *
-     * macOS names a background item in System Settings after the program a launchd agent runs, not
-     * after the agent's label — pointing the indexer and the team sync at the same console script
-     * listed them as two identical `claude-session-cache` rows with no way to tell which was which.
-     * The package now installs a second entry point for the sync alone. A venv from an older build
-     * does not have it yet, so fall back to the subcommand rather than write an agent that cannot start.
-     */
-    private fun syncCommand(): List<String> =
-        File(venvDir, "bin/claude-session-sync")
-            .takeIf { it.canExecute() }
-            ?.let { listOf(it.absolutePath) }
-            ?: listOf(executable.absolutePath, "sync")
 
     private val versionFile: File get() = File(installDir, ".bundle-version")
 
@@ -139,27 +131,36 @@ object McpRuntime {
         exec(listOf(executable.absolutePath, "ingest"), installDir, timeoutSeconds = SETUP_TIMEOUT_SECONDS)
 
     private val agentFile: File
-        get() = File(System.getProperty("user.home"), "Library/LaunchAgents/$REFRESH_AGENT_LABEL.plist")
+        get() = File(System.getProperty("user.home"), "Library/LaunchAgents/$AGENT_LABEL.plist")
+
+    private val legacySyncAgentFile: File
+        get() = File(System.getProperty("user.home"), "Library/LaunchAgents/$LEGACY_SYNC_AGENT_LABEL.plist")
 
     private val isMac: Boolean
         get() = System.getProperty("os.name").orEmpty().startsWith("Mac")
 
     /**
-     * Installs a per-user launchd agent that re-indexes daily, so the cache does not go
-     * stale between visits to the panel.
+     * Writes the one scheduled agent, matching its command and hours to [config].
      *
-     * The plist is generated from this machine's own home directory and the installed
-     * executable, never shipped — a checked-in plist would carry whichever username built
-     * it. Re-running is safe: the agent is unloaded before being loaded again.
+     * There is deliberately a single agent for both jobs: the sync cycle ingests before it
+     * exports, so scheduling indexing separately just indexed the same sessions a second time —
+     * and macOS listed the two as indistinguishable background items. The agent always runs
+     * `refresh`, which syncs when team sync is configured and otherwise only indexes, so the
+     * plist can never disagree with the settings about which work is due.
+     *
+     * The plist is generated from this machine's own home directory and the installed executable,
+     * never shipped — a checked-in plist would carry whichever username built it. Re-running is
+     * safe: the agent is unloaded before being loaded again.
      */
-    fun installRefreshAgent(): Pair<Boolean, String> {
-        if (!isMac) return true to "Scheduled refresh is macOS-only; skipped."
+    fun installAgent(config: TeamSyncConfig): Pair<Boolean, String> {
+        if (!isMac) return false to "Scheduled background work is macOS-only."
 
+        retireLegacySyncAgent()
         val home = System.getProperty("user.home")
         return try {
             File(home, ".claude-session-cache").mkdirs()
             agentFile.parentFile?.mkdirs()
-            agentFile.writeText(refreshAgentPlist(home))
+            agentFile.writeText(agentPlist(home, config))
 
             exec(listOf("launchctl", "unload", agentFile.absolutePath), installDir, timeoutSeconds = 20)
             val loaded = exec(
@@ -172,75 +173,84 @@ object McpRuntime {
             }
             loaded
         } catch (throwable: Throwable) {
-            LOG.warn("Could not install the refresh agent at ${agentFile.absolutePath}", throwable)
+            LOG.warn("Could not install the scheduled agent at ${agentFile.absolutePath}", throwable)
             false to (throwable.message ?: "Unknown error")
         }
     }
 
-    /** Turning MCP off must also stop the scheduled ingest, or it keeps running unseen. */
-    fun removeRefreshAgent() {
-        if (!isMac || !agentFile.isFile) return
+    /** Turning everything off must also stop the scheduled work, or it keeps running unseen. */
+    fun removeAgent() {
+        if (!isMac) return
+        retireLegacySyncAgent()
+        if (!agentFile.isFile) return
         exec(listOf("launchctl", "unload", agentFile.absolutePath), installDir, timeoutSeconds = 20)
         if (!agentFile.delete()) LOG.warn("Could not delete ${agentFile.absolutePath}")
     }
 
-    fun isRefreshAgentInstalled(): Boolean = agentFile.isFile
-
-    private val syncAgentFile: File
-        get() = File(System.getProperty("user.home"), "Library/LaunchAgents/$SYNC_AGENT_LABEL.plist")
+    fun isAgentInstalled(): Boolean = agentFile.isFile
 
     /**
-     * Installs the twice-daily team sync agent (see [syncCommand]).
+     * Migrates an agent written by an older build to the current plist, in place.
      *
-     * Every step of the sync cycle is idempotent, so it also runs once at load — a laptop
-     * that slept through both scheduled hours simply catches up at the next login.
+     * A plugin update replaces code, never the launchd agents already registered on the machine.
+     * Without this, an existing install would keep running the old pair — or, once the retired
+     * sync agent was cleared away, stop syncing entirely until someone happened to reopen
+     * settings and apply.
+     *
+     * Deliberately a no-op when the plist already matches: reloading an agent fires `RunAtLoad`,
+     * so rewriting unconditionally would start a sync every time the tool window opened.
      */
-    fun installSyncAgent(hours: List<Int>): Pair<Boolean, String> {
-        if (!isMac) return false to "Scheduled team sync is macOS-only."
+    fun reconcileAgent(config: TeamSyncConfig) {
+        if (!isMac) return
+        val hasLegacyAgent = legacySyncAgentFile.isFile
+        if (!agentFile.isFile && !hasLegacyAgent) return
 
-        val home = System.getProperty("user.home")
-        return try {
-            File(home, ".claude-session-cache").mkdirs()
-            syncAgentFile.parentFile?.mkdirs()
-            syncAgentFile.writeText(syncAgentPlist(home, hours.ifEmpty { TeamSyncConfig.DEFAULT_SYNC_HOURS }))
+        val desired = runCatching { agentPlist(System.getProperty("user.home"), config) }.getOrNull() ?: return
+        val current = agentFile.takeIf { it.isFile }?.let { runCatching { it.readText() }.getOrNull() }
+        if (!hasLegacyAgent && current == desired) return
 
-            exec(listOf("launchctl", "unload", syncAgentFile.absolutePath), installDir, timeoutSeconds = 20)
-            val loaded = exec(
-                listOf("launchctl", "load", "-w", syncAgentFile.absolutePath),
-                installDir,
-                timeoutSeconds = 20,
-            )
-            if (!loaded.first) {
-                LOG.warn("launchctl load failed for ${syncAgentFile.absolutePath}: ${loaded.second}")
-            }
-            loaded
-        } catch (throwable: Throwable) {
-            LOG.warn("Could not install the sync agent at ${syncAgentFile.absolutePath}", throwable)
-            false to (throwable.message ?: "Unknown error")
-        }
+        LOG.info("Migrating the scheduled agent to the merged index-and-sync job.")
+        installAgent(config)
     }
 
-    fun removeSyncAgent() {
-        if (!isMac || !syncAgentFile.isFile) return
-        exec(listOf("launchctl", "unload", syncAgentFile.absolutePath), installDir, timeoutSeconds = 20)
-        if (!syncAgentFile.delete()) LOG.warn("Could not delete ${syncAgentFile.absolutePath}")
+    /**
+     * Removes the separate sync agent earlier builds installed.
+     *
+     * Upgrading only replaces plugin code, not the launchd agents already registered on the
+     * machine, so without this the retired agent would keep firing twice a day forever.
+     */
+    fun retireLegacySyncAgent() {
+        if (!isMac || !legacySyncAgentFile.isFile) return
+        exec(listOf("launchctl", "unload", legacySyncAgentFile.absolutePath), installDir, timeoutSeconds = 20)
+        if (!legacySyncAgentFile.delete()) LOG.warn("Could not delete ${legacySyncAgentFile.absolutePath}")
     }
 
-    fun isSyncAgentInstalled(): Boolean = syncAgentFile.isFile
-
-    /** Runs one sync cycle right now, for the settings dialog's "Sync now" feedback. */
+    /** Runs one sync cycle right now, for the status strip's "Sync now" feedback. */
     fun runSync(): Pair<Boolean, String> =
-        exec(syncCommand(), installDir, timeoutSeconds = SETUP_TIMEOUT_SECONDS)
+        exec(listOf(executable.absolutePath, "sync"), installDir, timeoutSeconds = SETUP_TIMEOUT_SECONDS)
 
-    private fun syncAgentPlist(home: String, hours: List<Int>): String {
-        val program = syncCommand().joinToString("\n") { argument -> "                <string>$argument</string>" }
-        val intervals = hours.joinToString("\n") { hour ->
+    /**
+     * The hours the job runs at, and why they differ.
+     *
+     * Sharing means the run also pushes and pulls, so it follows the hours chosen in settings —
+     * work the user expects to see land during the day. With nothing to share it is pure indexing,
+     * which nobody is waiting on, so it goes back to a single overnight pass.
+     */
+    private fun schedule(config: TeamSyncConfig): List<Pair<Int, Int>> =
+        if (config.enabled) {
+            config.syncHours.ifEmpty { TeamSyncConfig.DEFAULT_SYNC_HOURS }.map { hour -> hour to SYNC_MINUTE }
+        } else {
+            listOf(INDEX_ONLY_HOUR to 0)
+        }
+
+    private fun agentPlist(home: String, config: TeamSyncConfig): String {
+        val intervals = schedule(config).joinToString("\n") { (hour, minute) ->
             """
                 <dict>
                     <key>Hour</key>
                     <integer>$hour</integer>
                     <key>Minute</key>
-                    <integer>17</integer>
+                    <integer>$minute</integer>
                 </dict>
             """.trimEnd()
         }
@@ -250,10 +260,11 @@ object McpRuntime {
         <plist version="1.0">
         <dict>
             <key>Label</key>
-            <string>$SYNC_AGENT_LABEL</string>
+            <string>$AGENT_LABEL</string>
             <key>ProgramArguments</key>
             <array>
-$program
+                <string>${executable.absolutePath}</string>
+                <string>refresh</string>
             </array>
             <key>RunAtLoad</key>
             <true/>
@@ -262,15 +273,15 @@ $program
 $intervals
             </array>
             <key>StandardOutPath</key>
-            <string>$home/.claude-session-cache/sync.log</string>
+            <string>$home/.claude-session-cache/refresh.log</string>
             <key>StandardErrorPath</key>
-            <string>$home/.claude-session-cache/sync.error.log</string>
+            <string>$home/.claude-session-cache/refresh.error.log</string>
             <key>EnvironmentVariables</key>
             <dict>
                 <key>HOME</key>
                 <string>$home</string>
                 <key>PATH</key>
-                <string>$SYNC_AGENT_PATH</string>
+                <string>$AGENT_PATH</string>
             </dict>
             <key>Nice</key>
             <integer>5</integer>
@@ -280,45 +291,6 @@ $intervals
         </plist>
         """.trimIndent()
     }
-
-    private fun refreshAgentPlist(home: String): String =
-        """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key>
-            <string>$REFRESH_AGENT_LABEL</string>
-            <key>ProgramArguments</key>
-            <array>
-                <string>${executable.absolutePath}</string>
-                <string>ingest</string>
-            </array>
-            <key>RunAtLoad</key>
-            <true/>
-            <key>StartCalendarInterval</key>
-            <dict>
-                <key>Hour</key>
-                <integer>$REFRESH_HOUR</integer>
-                <key>Minute</key>
-                <integer>0</integer>
-            </dict>
-            <key>StandardOutPath</key>
-            <string>$home/.claude-session-cache/ingest.log</string>
-            <key>StandardErrorPath</key>
-            <string>$home/.claude-session-cache/ingest.error.log</string>
-            <key>EnvironmentVariables</key>
-            <dict>
-                <key>HOME</key>
-                <string>$home</string>
-            </dict>
-            <key>Nice</key>
-            <integer>5</integer>
-            <key>ProcessType</key>
-            <string>Background</string>
-        </dict>
-        </plist>
-        """.trimIndent()
 
     private fun extractBundle() {
         val loader = McpRuntime::class.java.classLoader

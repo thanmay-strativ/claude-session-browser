@@ -143,10 +143,11 @@ same time can never conflict.
   scheduled sync fails.
 - **Choose what Claude searches by default** — just your sessions, or the whole team's.
 - A **status strip** under the toolbar shows the last run, what moved, and the countdown to
-  the next one. A scheduled job runs the full cycle (pull → import → export → push) twice a
-  day and catches up at login if the laptop was asleep. If `gitleaks` is installed,
-  everything is secret-scanned again before each push.
-- **Stats → Health** shows whether the background jobs, per-account MCP registrations and
+  the next one. One background job runs the full cycle (pull → import → export → push) twice a
+  day and catches up at login if the laptop was asleep — the same job that keeps the search
+  index current, so nothing is indexed twice. If `gitleaks` is installed, everything is
+  secret-scanned again before each push.
+- **Stats → Health** shows whether the background job, per-account MCP registrations and
   supporting tools are actually working.
 
 Four gates decide whether a session ever leaves your machine — it has to pass all of them:

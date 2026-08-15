@@ -28,52 +28,53 @@ object HealthCheckService {
 
     fun load(): Report = Report(jobs = jobChecks(), tools = toolChecks())
 
-    private fun jobChecks(): List<Check> = listOf(refreshJobCheck(), syncJobCheck())
+    private fun jobChecks(): List<Check> = listOf(scheduledJobCheck(), syncOutcomeCheck())
 
-    private fun refreshJobCheck(): Check {
-        if (!McpRuntime.isRefreshAgentInstalled()) {
+    /**
+     * The one launchd agent. Team sync is a step inside its run rather than a job of its own,
+     * so what it does — and when — depends on whether sharing is configured.
+     */
+    private fun scheduledJobCheck(): Check {
+        val label = "Scheduled job"
+        if (!McpRuntime.isAgentInstalled()) {
             return Check(
-                "Daily re-index",
+                label,
                 State.OFF,
                 "Not scheduled. It is installed when session search (MCP) is enabled.",
             )
         }
-        return when (val exitStatus = launchdLastExitStatus(REFRESH_AGENT_LABEL)) {
+        return when (val exitStatus = launchdLastExitStatus(AGENT_LABEL)) {
             null -> Check(
-                "Daily re-index",
+                label,
                 State.PROBLEM,
                 "The agent file exists but launchd has not loaded it — re-enable MCP to reload it.",
             )
-            0 -> Check(
-                "Daily re-index",
-                State.OK,
-                "Runs daily at 03:00${lastActivitySuffix(cacheFile("ingest.log"))}.",
-            )
+            0 -> Check(label, State.OK, "${scheduleSummary()}${lastActivitySuffix(cacheFile("refresh.log"))}.")
             else -> Check(
-                "Daily re-index",
+                label,
                 State.PROBLEM,
-                "Last run exited with status $exitStatus — see ~/.claude-session-cache/ingest.error.log.",
+                "Last run exited with status $exitStatus — see ~/.claude-session-cache/refresh.error.log.",
             )
         }
     }
 
-    private fun syncJobCheck(): Check {
+    private fun scheduleSummary(): String {
+        val config = SessionMetadataStore.teamSync()
+        if (!config.enabled) return "Indexes your sessions daily at 03:00"
+        val hours = config.syncHours.joinToString(", ") { String.format("%02d:%02d", it, SYNC_MINUTE) }
+        return "Indexes and syncs at $hours"
+    }
+
+    private fun syncOutcomeCheck(): Check {
         val config = SessionMetadataStore.teamSync()
         if (!config.enabled) {
             return Check("Team sync", State.OFF, "Off. Enable it in Settings → Team Sync.")
         }
-        if (!McpRuntime.isSyncAgentInstalled()) {
+        if (!McpRuntime.isAgentInstalled()) {
             return Check(
                 "Team sync",
                 State.PROBLEM,
-                "Enabled in settings but not scheduled — open Settings → Team Sync and apply again.",
-            )
-        }
-        if (launchdLastExitStatus(SYNC_AGENT_LABEL) == null) {
-            return Check(
-                "Team sync",
-                State.PROBLEM,
-                "The agent file exists but launchd has not loaded it — apply the settings again to reload it.",
+                "Enabled in settings but nothing is scheduled — open Settings → Team Sync and apply again.",
             )
         }
         return lastSyncOutcome(config)

@@ -908,10 +908,18 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         super.doOKAction()
     }
 
-    /** Clone if needed and (un)install the scheduled agent — off the EDT, reporting only failures. */
+    /** Clone if needed and reschedule the background job — off the EDT, reporting only failures. */
     private fun applyTeamSync(config: TeamSyncConfig) {
         if (!config.enabled) {
-            ApplicationManager.getApplication().executeOnPooledThread { McpRuntime.removeSyncAgent() }
+            // Turning sharing off must not stop indexing: the same job drops back to its
+            // index-only schedule rather than being removed.
+            ApplicationManager.getApplication().executeOnPooledThread {
+                if (McpRuntime.isAgentInstalled()) {
+                    McpRuntime.installAgent(config)
+                } else {
+                    McpRuntime.retireLegacySyncAgent()
+                }
+            }
             return
         }
 
@@ -932,10 +940,10 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                     }
                 }
 
-                indicator.text = "Scheduling the sync agent…"
-                val installed = McpRuntime.installSyncAgent(config.syncHours)
+                indicator.text = "Scheduling the background job…"
+                val installed = McpRuntime.installAgent(config)
                 if (!installed.first) {
-                    failure = "Scheduling the sync agent failed.\n\n${installed.second}"
+                    failure = "Scheduling the background job failed.\n\n${installed.second}"
                 }
             }
 

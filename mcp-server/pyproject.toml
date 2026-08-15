@@ -9,9 +9,6 @@ dependencies = [
 
 [project.scripts]
 claude-session-cache = "claude_session_cache.cli:main"
-# Same package, own name: macOS labels a background item after the program it runs, so the
-# scheduled sync needs its own console script to be tellable apart from the indexer.
-claude-session-sync = "claude_session_cache.cli:sync_main"
 
 [build-system]
 requires = ["hatchling"]

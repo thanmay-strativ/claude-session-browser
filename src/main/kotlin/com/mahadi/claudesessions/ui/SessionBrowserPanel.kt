@@ -423,8 +423,23 @@ class SessionBrowserPanel(
      * Silent by design: nothing was broken and nothing is being asked of the user, so it reports
      * only when it fails.
      */
+    /**
+     * Moves an install from the old pair of launchd agents to the single merged job.
+     *
+     * Silent and idempotent: it rewrites nothing when the agent already matches, so this costs a
+     * file comparison on every open and does real work exactly once, after the upgrade.
+     */
+    private fun migrateScheduledAgent() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            McpRuntime.reconcileAgent(SessionMetadataStore.teamSync())
+        }
+    }
+
     private fun upgradeMcpIfStale() {
-        if (!McpRuntime.isInstalled() || !McpRuntime.isStale()) return
+        if (!McpRuntime.isInstalled() || !McpRuntime.isStale()) {
+            migrateScheduledAgent()
+            return
+        }
 
         object : Task.Backgroundable(project, "Updating Claude session cache", false) {
             private var failure: String? = null
@@ -435,8 +450,11 @@ class SessionBrowserPanel(
                 failure = failed?.let { "${it.label}: ${it.detail}" }
             }
 
+            // Only once the new Python is in place: rescheduling runs the job immediately, and the
+            // command it now runs does not exist in the version being replaced.
             override fun onFinished() {
                 failure?.let { LOG.warn("Could not update the bundled session cache — $it") }
+                if (failure == null) migrateScheduledAgent()
             }
         }.queue()
     }
@@ -481,7 +499,7 @@ class SessionBrowserPanel(
                 }
 
                 indicator.text = "Scheduling daily refresh…"
-                scheduled = McpRuntime.installRefreshAgent().first
+                scheduled = McpRuntime.installAgent(SessionMetadataStore.teamSync()).first
             }
 
             override fun onFinished() {
@@ -519,7 +537,11 @@ class SessionBrowserPanel(
         mcpToggle.isEnabled = false
         ApplicationManager.getApplication().executeOnPooledThread {
             val result = McpRegistrationService.unregister()
-            if (result.success) McpRuntime.removeRefreshAgent()
+            if (result.success) {
+                // One agent serves both features now, so it may only go when team sync is off too.
+                val teamSync = SessionMetadataStore.teamSync()
+                if (teamSync.enabled) McpRuntime.installAgent(teamSync) else McpRuntime.removeAgent()
+            }
             ApplicationManager.getApplication().invokeLater(
                 {
                     mcpToggle.isEnabled = true
