@@ -47,21 +47,18 @@
         <ul>
             <li>Team sync: share redacted sessions with your team through a private git repo</li>
             <li>Claude can search the whole team's history (scope: mine / team / one person)</li>
-            <li>Sync status strip: last run, what moved, and a live countdown to the next one</li>
             <li>"Share with team" per session, ticked by default; unticking retracts it</li>
             <li>Choose what Claude searches by default: your sessions or the team's</li>
             <li>Skip trivial and old sessions; pause sharing; add your own redaction patterns</li>
+            <li>Sync status strip: last run, what moved, and a live countdown to the next one</li>
             <li>Get notified when a scheduled sync fails</li>
-            <li>Redesigned settings, health view and toolbar; project picker replaces typing names</li>
+            <li>Stats gains a Health tab: the background job, MCP registration per account, supporting tools</li>
+            <li>One scheduled job rather than two — the sync already re-indexes, so nothing is indexed twice</li>
+            <li>Session search now lives in Settings → General, with its explanation beside it</li>
+            <li>Reworked panel: an All toggle beside the search field, flat account and filter pickers</li>
+            <li>Reworked settings: sectioned cards, a worked example per field, projects picked inline</li>
             <li>MCP registration now covers every account, not just the active one</li>
             <li>Tag suggestions no longer save CLI warnings as tags</li>
-            <li>One background job instead of two: the sync already re-indexes, so it no longer runs twice — and macOS lists a single item</li>
-            <li>Session search moved from the toolbar to Settings → General; Content now sits with the search field</li>
-            <li>Account and filter pickers redrawn as flat dropdowns instead of native combo boxes</li>
-            <li>Settings fields carry a worked example, and each switch says what it does</li>
-            <li>"Content" is now an "All" toggle that fits the toolbar, so the search field and buttons stop being squeezed</li>
-            <li>Projects are picked from a list in the form itself — no dropdown covering the fields under it</li>
-            <li>Account and filter pickers open a plain menu instead of a popup with a title banner taller than the list</li>
         </ul>
         <h4>1.1.19</h4>
         <ul>
