@@ -1,10 +1,8 @@
 package com.mahadi.claudesessions.ui
 
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
-import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
@@ -24,8 +22,6 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
-import com.intellij.ui.components.fields.ExtendableTextComponent
-import com.intellij.ui.components.fields.ExtendableTextField
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
@@ -43,8 +39,6 @@ import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Graphics
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.swing.BoxLayout
@@ -71,8 +65,8 @@ private const val SCOPE_TEAM_LABEL = "The whole team's sessions"
 /** CSS px for wrapping hint text; see [SessionSettingsDialog.wrapped] for why it is not scaled. */
 private const val HINT_WRAP_WIDTH = 440
 
-/** Past this the project popup scrolls rather than growing taller than the dialog. */
-private const val MAX_VISIBLE_PROJECT_ROWS = 9
+/** Past this the project list scrolls rather than pushing the filters below it off the card. */
+private const val VISIBLE_PROJECT_ROWS = 5
 
 /**
  * The plugin's settings: Claude environments, team knowledge-base sync, and general
@@ -136,24 +130,19 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         setCheckBoxListListener { _, _ -> updateProjectsSummary() }
     }
     /**
-     * A read-only field with a dropdown affordance rather than a button: the macOS
-     * look-and-feel centres and upper-cases button text, which turned the selected
-     * project into a shouted "TOURBOOKER" with the arrow stranded at the far left.
+     * The projects sit inline rather than behind a dropdown.
+     *
+     * As a popup this list had nowhere good to go: anchored under its field it covered the
+     * filters immediately below, it carried the popup chrome of whatever theme was loaded, and
+     * picking several projects — the normal case — meant reopening it. The tab scrolls, so a
+     * short capped list costs nothing and leaves the ticks visible while the rest is edited.
      */
-    private val projectsField = ExtendableTextField().apply {
-        isEditable = false
-        addExtension(
-            ExtendableTextComponent.Extension.create(
-                AllIcons.General.ArrowDown,
-                "Choose which projects to share",
-            ) { showProjectsPopup() }
-        )
-        addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(event: MouseEvent) {
-                if (isEnabled) showProjectsPopup()
-            }
-        })
+    private val projectsScroller = JBScrollPane(projectList).apply {
+        horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+        preferredSize = Dimension(JBUI.scale(320), JBUI.scale(VISIBLE_PROJECT_ROWS * 24 + 8))
+        maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(VISIBLE_PROJECT_ROWS * 24 + 8))
     }
+    private val projectsSummary = JBLabel().apply { font = JBFont.small() }
     private val minMessagesSpinner = JSpinner(SpinnerNumberModel(TeamSyncConfig.DEFAULT_MIN_MESSAGES, 0, 999, 1))
     private val maxAgeSpinner = JSpinner(SpinnerNumberModel(0, 0, 3650, 30))
     private val redactionArea = JBTextArea(4, 20).apply {
@@ -270,55 +259,15 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
         }
     }
 
-    /**
-     * The project list lives in a dropdown rather than inline: it is as long as the
-     * user's project history, and a scrolling box wired into the form pushed everything
-     * below it off the visible area.
-     */
-    private fun showProjectsPopup() {
-        if (projectList.itemsCount == 0) return
-        val scrollPane = JBScrollPane(projectList).apply {
-            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
-            // Sized to what is actually in the list. A fixed height left three projects
-            // floating at the top of a tall, empty box that covered the fields below it.
-            preferredSize = Dimension(
-                maxOf(projectsField.width, JBUI.scale(320)),
-                projectsPopupHeight(),
-            )
-        }
-        JBPopupFactory.getInstance()
-            .createComponentPopupBuilder(scrollPane, projectList)
-            .setRequestFocus(true)
-            .setResizable(true)
-            .setMovable(false)
-            .setCancelOnClickOutside(true)
-            .createPopup()
-            .showUnderneathOf(projectsField)
-    }
-
-    private fun projectsPopupHeight(): Int {
-        // The list has not been laid out when the popup is first built, so its own row height can
-        // come back missing or nonsensically small; the floor keeps the popup usable either way.
-        val measured = projectList.getCellBounds(0, 0)?.height ?: 0
-        val rowHeight = maxOf(measured, JBUI.scale(24))
-        val rows = projectList.itemsCount.coerceAtMost(MAX_VISIBLE_PROJECT_ROWS)
-        return rowHeight * rows + JBUI.scale(8)
-    }
-
     private fun updateProjectsSummary() {
         val selected = selectedProjects()
-        projectsField.text = when {
-            projectList.itemsCount == 0 -> "No projects indexed yet"
-            selected.isEmpty() -> "None selected — nothing will be shared"
-            selected.size == 1 -> selected.single()
-            selected.size <= 3 -> selected.joinToString(", ")
-            else -> "${selected.take(2).joinToString(", ")} +${selected.size - 2} more"
+        projectsSummary.text = when {
+            projectList.itemsCount == 0 -> "No projects indexed yet — build the search index first."
+            selected.isEmpty() -> "Nothing ticked, so nothing would be shared."
+            selected.size == 1 -> "Sharing ${selected.single()}."
+            else -> "Sharing ${selected.size} projects: ${selected.joinToString(", ")}."
         }
-        projectsField.toolTipText = if (selected.isEmpty()) {
-            "No projects ticked — team sync would publish nothing."
-        } else {
-            "<html>Sharing:<br>${selected.joinToString("<br>")}</html>"
-        }
+        projectsSummary.foreground = if (selected.isEmpty()) Ui.ATTENTION else Ui.inkMuted
     }
 
     private fun refreshStatusBanner() {
@@ -365,7 +314,7 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
     private fun updateSyncFieldsEnabled() {
         val enabled = syncEnabledCheckbox.isSelected
         listOf<JComponent>(
-            repoUrlField, repoPathField, ownerField, scopeCombo, projectsField,
+            repoUrlField, repoPathField, ownerField, scopeCombo, projectList,
             minMessagesSpinner, maxAgeSpinner, redactionArea, syncHoursField,
             pauseCheckbox, notifyCheckbox,
         ).forEach { it.isEnabled = enabled }
@@ -551,10 +500,18 @@ class SessionSettingsDialog(private val project: Project) : DialogWrapper(projec
                 add(
                     field(
                         "Projects",
-                        projectsField,
-                        "Open the list and tick the projects to share. Drawn from your indexed history.",
-                        "tourbooker, billing-api",
+                        projectsScroller,
+                        "Tick the projects to share. Drawn from your indexed history.",
                     )
+                )
+                add(
+                    JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                        isOpaque = false
+                        alignmentX = Component.LEFT_ALIGNMENT
+                        border = JBUI.Borders.emptyTop(4)
+                        maximumSize = Dimension(Int.MAX_VALUE, projectsSummary.preferredSize.height + JBUI.scale(4))
+                        add(projectsSummary, BorderLayout.WEST)
+                    }
                 )
                 add(
                     numberField(

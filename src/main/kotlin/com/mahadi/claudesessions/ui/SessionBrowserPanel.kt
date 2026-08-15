@@ -10,7 +10,6 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.DocumentAdapter
@@ -56,6 +55,7 @@ import javax.swing.JButton
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JPopupMenu
+import javax.swing.JRadioButtonMenuItem
 import javax.swing.JScrollPane
 import javax.swing.JTree
 import javax.swing.Timer
@@ -340,16 +340,26 @@ class SessionBrowserPanel(
         refreshButton.toolTipText = "Rescan ${environment.sessionRoot}"
     }
 
+    /**
+     * A plain menu, not a chooser popup.
+     *
+     * The chooser gives a two-item picker a full popup frame with a bold title banner taller
+     * than the list under it. A menu is what this actually is: the current value ticked, the
+     * alternatives beneath, anchored to the chip that opened it.
+     */
     private fun showEnvironmentPopup(anchor: DropdownChip) {
         val environments = SessionMetadataStore.environments()
         if (environments.isEmpty()) return
-        JBPopupFactory.getInstance()
-            .createPopupChooserBuilder(environments)
-            .setTitle("Claude account")
-            .setSelectedValue(SessionMetadataStore.activeEnvironment(), true)
-            .setItemChosenCallback { chosen -> selectEnvironment(chosen) }
-            .createPopup()
-            .showUnderneathOf(anchor)
+        val active = SessionMetadataStore.activeEnvironment().name
+        val menu = JPopupMenu()
+        environments.forEach { environment ->
+            menu.add(
+                JRadioButtonMenuItem(environment.name, environment.name == active).apply {
+                    addActionListener { selectEnvironment(environment) }
+                }
+            )
+        }
+        menu.show(anchor, 0, anchor.height + JBUI.scale(2))
     }
 
     private fun selectEnvironment(selected: ClaudeEnvironment) {
@@ -364,17 +374,19 @@ class SessionBrowserPanel(
     }
 
     private fun showFilterPopup(anchor: DropdownChip) {
-        JBPopupFactory.getInstance()
-            .createPopupChooserBuilder(SessionFilter.entries.toList())
-            .setTitle("Show")
-            .setSelectedValue(activeFilter, true)
-            .setItemChosenCallback { chosen ->
-                activeFilter = chosen
-                filterChip.setLabel(chosen.toString())
-                rebuildTree(searchField.text)
-            }
-            .createPopup()
-            .showUnderneathOf(anchor)
+        val menu = JPopupMenu()
+        SessionFilter.entries.forEach { filter ->
+            menu.add(
+                JRadioButtonMenuItem(filter.toString(), filter == activeFilter).apply {
+                    addActionListener {
+                        activeFilter = filter
+                        filterChip.setLabel(filter.toString())
+                        rebuildTree(searchField.text)
+                    }
+                }
+            )
+        }
+        menu.show(anchor, 0, anchor.height + JBUI.scale(2))
     }
 
     private fun applyAutoRefreshSetting() {
