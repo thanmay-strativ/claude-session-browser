@@ -119,6 +119,11 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
+def sync_main() -> int:
+    """Console script for the scheduled team sync, so macOS lists it under its own name."""
+    return main([*sys.argv[1:], "sync"])
+
+
 def _add_sync_arguments(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--repo", type=Path, default=None, help="knowledge-base repo path (default: from plugin settings)"

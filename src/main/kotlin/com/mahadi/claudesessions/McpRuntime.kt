@@ -42,6 +42,21 @@ object McpRuntime {
     /** The console script the MCP registration and the stats reader both invoke. */
     val executable: File get() = File(venvDir, "bin/claude-session-cache")
 
+    /**
+     * How to run one sync cycle.
+     *
+     * macOS names a background item in System Settings after the program a launchd agent runs, not
+     * after the agent's label — pointing the indexer and the team sync at the same console script
+     * listed them as two identical `claude-session-cache` rows with no way to tell which was which.
+     * The package now installs a second entry point for the sync alone. A venv from an older build
+     * does not have it yet, so fall back to the subcommand rather than write an agent that cannot start.
+     */
+    private fun syncCommand(): List<String> =
+        File(venvDir, "bin/claude-session-sync")
+            .takeIf { it.canExecute() }
+            ?.let { listOf(it.absolutePath) }
+            ?: listOf(executable.absolutePath, "sync")
+
     private val versionFile: File get() = File(installDir, ".bundle-version")
 
     fun isInstalled(): Boolean = executable.canExecute()
@@ -175,7 +190,7 @@ object McpRuntime {
         get() = File(System.getProperty("user.home"), "Library/LaunchAgents/$SYNC_AGENT_LABEL.plist")
 
     /**
-     * Installs the twice-daily team sync agent (`claude-session-cache sync`).
+     * Installs the twice-daily team sync agent (see [syncCommand]).
      *
      * Every step of the sync cycle is idempotent, so it also runs once at load — a laptop
      * that slept through both scheduled hours simply catches up at the next login.
@@ -215,9 +230,10 @@ object McpRuntime {
 
     /** Runs one sync cycle right now, for the settings dialog's "Sync now" feedback. */
     fun runSync(): Pair<Boolean, String> =
-        exec(listOf(executable.absolutePath, "sync"), installDir, timeoutSeconds = SETUP_TIMEOUT_SECONDS)
+        exec(syncCommand(), installDir, timeoutSeconds = SETUP_TIMEOUT_SECONDS)
 
     private fun syncAgentPlist(home: String, hours: List<Int>): String {
+        val program = syncCommand().joinToString("\n") { argument -> "                <string>$argument</string>" }
         val intervals = hours.joinToString("\n") { hour ->
             """
                 <dict>
@@ -237,8 +253,7 @@ object McpRuntime {
             <string>$SYNC_AGENT_LABEL</string>
             <key>ProgramArguments</key>
             <array>
-                <string>${executable.absolutePath}</string>
-                <string>sync</string>
+$program
             </array>
             <key>RunAtLoad</key>
             <true/>

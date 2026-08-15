@@ -32,7 +32,7 @@ one source of truth, copied in at build time.
 | What | Path |
 |---|---|
 | Extracted MCP server | `~/.claude-session-browser/mcp-server` |
-| Its venv entry point | `~/.claude-session-browser/mcp-server/.venv/bin/claude-session-cache` |
+| Its venv entry points | `.venv/bin/claude-session-cache` (index, serve, stats) and `.venv/bin/claude-session-sync` (team sync — a separate name only so macOS lists the two launchd agents distinctly) |
 | Bundle fingerprint | `~/.claude-session-browser/mcp-server/.bundle-version` |
 | Cache database | `~/.claude-session-cache/sessions.db` |
 | Titles / pins / tags / environments | `~/.claude-session-browser/metadata.json` |
