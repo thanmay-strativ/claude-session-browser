@@ -496,10 +496,8 @@ def _run_cycle(connection: sqlite3.Connection, config: TeamSyncConfig, stats: Sy
 
     has_git = (repo_path / ".git").exists()
     if has_git:
-        pulled = _git(repo_path, "pull", "--rebase", "--autostash")
-        if not pulled[0]:
-            _git(repo_path, "rebase", "--abort")
-        stats.steps.append({"step": "pull", "ok": pulled[0], "detail": pulled[1][-400:]})
+        pulled = _pull(repo_path)
+        stats.steps.append({"step": "pull", "ok": pulled[0], "detail": pulled[1]})
 
     import_sessions(connection, repo_path, config.owner, stats)
 
@@ -587,6 +585,41 @@ def _gitleaks_clean(repo_path: Path, own_paths: list[Path], stats: SyncStats) ->
             return False
     stats.steps.append({"step": "secret-scan", "ok": True, "detail": f"{len(own_paths)} directories clean."})
     return True
+
+
+def _pull(repo_path: Path) -> tuple[bool, str]:
+    """Rebase onto this branch's upstream by name, never on whatever local tracking config says.
+
+    A bare `git pull --rebase` reads `branch.<name>.merge`, so a clone with missing or
+    duplicated tracking config fails with git's opaque "Cannot rebase onto multiple
+    branches" and stays stuck every cycle. Naming the remote and branch bypasses that
+    config entirely, which is right for a repo where every writer owns one directory.
+    """
+    branch = _git(repo_path, "symbolic-ref", "--short", "HEAD")
+    if not branch[0]:
+        return False, (
+            f"{repo_path} is not on a branch (detached HEAD), so nothing can be pulled or "
+            f"pushed. Run: git -C {repo_path} checkout main"
+        )
+    branch_name = branch[1].strip()
+    configured_remote = _git(repo_path, "config", f"branch.{branch_name}.remote")
+    remote_name = (configured_remote[1].strip() if configured_remote[0] else "") or "origin"
+
+    pulled = _git(repo_path, "pull", "--rebase", "--autostash", remote_name, branch_name)
+    if pulled[0]:
+        return True, pulled[1][-400:]
+
+    if _rebase_in_progress(repo_path):
+        _git(repo_path, "rebase", "--abort")
+    return False, f"Pulling {remote_name}/{branch_name} into {repo_path} failed. {pulled[1][-400:]}"
+
+
+def _rebase_in_progress(repo_path: Path) -> bool:
+    git_dir = _git(repo_path, "rev-parse", "--absolute-git-dir")
+    if not git_dir[0]:
+        return False
+    state_root = Path(git_dir[1].strip())
+    return (state_root / "rebase-merge").exists() or (state_root / "rebase-apply").exists()
 
 
 def _git(repo_path: Path, *arguments: str) -> tuple[bool, str]:

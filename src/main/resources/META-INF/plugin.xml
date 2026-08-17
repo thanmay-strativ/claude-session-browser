@@ -43,6 +43,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h4>1.2.1</h4>
+        <ul>
+            <li>Team sync no longer sticks at 'pull' with "Cannot rebase onto multiple branches"</li>
+            <li>A knowledge-base repo left on no branch now tells you what to run</li>
+            <li>A half-finished rebase is only cleaned up when there really is one</li>
+        </ul>
         <h4>1.2.0</h4>
         <ul>
             <li>Team sync: share redacted sessions with your team through a private git repo</li>
