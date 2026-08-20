@@ -13,8 +13,8 @@
 -->
 <plugins>
     <plugin id="com.mahadi.claudesessions"
-            url="https://github.com/thanmay-strativ/claude-session-browser/releases/download/v1.2.1/claude-session-browser-1.2.1.zip"
-            version="1.2.1">
+            url="https://github.com/thanmay-strativ/claude-session-browser/releases/download/v1.2.2/claude-session-browser-1.2.2.zip"
+            version="1.2.2">
         <idea-version since-build="242" until-build="299.*"/>
     </plugin>
 </plugins>
