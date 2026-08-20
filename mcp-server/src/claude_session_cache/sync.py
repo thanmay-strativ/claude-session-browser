@@ -26,9 +26,26 @@ from .redact import redact
 EXPORT_FORMAT = 1
 DELETIONS_FILE = "deletions.jsonl"
 SYNC_STATUS_PATH = DEFAULT_CACHE_DIR / "sync-status.json"
+GITLEAKS_CONFIG_PATH = DEFAULT_CACHE_DIR / "gitleaks.toml"
 
 _GIT_TIMEOUT_SECONDS = 120
 _UNSAFE_PATH_CHARS = re.compile(r"[^A-Za-z0-9._@+-]")
+
+# Extends gitleaks' own default rules rather than replacing them — this only silences
+# shapes we've confirmed are not secrets. `regexTarget = "match"` is required for the
+# key-name prefix to be visible at all: gitleaks' default allowlist target is the bare
+# secret value, which can't distinguish `fileKey=<id>` from a real key of the same length.
+_GITLEAKS_ALLOWLIST_TOML = """\
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Non-secret identifiers that match generic-api-key by shape (e.g. Figma file keys)"
+regexTarget = "match"
+regexes = [
+  '''(?i)\\bfileKey\\s*=\\s*[A-Za-z0-9]{15,30}\\b''',
+]
+"""
 
 
 @dataclass
@@ -561,6 +578,17 @@ def _own_paths(repo_path: Path, owner: str) -> list[Path]:
     ]
 
 
+def _gitleaks_config() -> Path:
+    """Writes the bundled allowlist to the cache dir, refreshing it if this build changed it."""
+    if (
+        not GITLEAKS_CONFIG_PATH.is_file()
+        or GITLEAKS_CONFIG_PATH.read_text(encoding="utf-8") != _GITLEAKS_ALLOWLIST_TOML
+    ):
+        GITLEAKS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        GITLEAKS_CONFIG_PATH.write_text(_GITLEAKS_ALLOWLIST_TOML, encoding="utf-8")
+    return GITLEAKS_CONFIG_PATH
+
+
 def _gitleaks_clean(repo_path: Path, own_paths: list[Path], stats: SyncStats) -> bool:
     """Second redaction layer: refuse to push anything gitleaks flags in own files."""
     import shutil
@@ -572,8 +600,12 @@ def _gitleaks_clean(repo_path: Path, own_paths: list[Path], stats: SyncStats) ->
         )
         return True
 
+    config_path = _gitleaks_config()
     for own_path in own_paths:
-        result = _exec([gitleaks, "detect", "--no-git", "--no-banner", "--source", str(own_path)], repo_path)
+        result = _exec(
+            [gitleaks, "detect", "--no-git", "--no-banner", "--config", str(config_path), "--source", str(own_path)],
+            repo_path,
+        )
         if not result[0]:
             stats.steps.append(
                 {

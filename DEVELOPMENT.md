@@ -421,6 +421,7 @@ itself. `since-build`/`until-build` in the descriptor should track `build.gradle
 | 1.1.18 | Tool use split, MCP tools grouped by server |
 | 1.1.19 | Branch always visible on a row; shortens instead of disappearing; detached `HEAD` shown |
 | 1.2.0 | **Team knowledge base**: schema v4 `owner` column; `export`/`import`/`sync` CLI (per-session JSONL in a private git repo, tombstones retract held-back sessions); `scope` on the MCP search tools plus a configurable default; one launchd agent (`refresh`) doing both indexing and sync; sync status strip with countdown; "Share with team" per session; export filters (min messages, max age), pause, custom redaction patterns, failure notifications; redesigned settings/health/toolbar; MCP registration covers every account; auto-tagger stdin/stderr fix |
+| 1.2.2 | Team sync no longer stays blocked when gitleaks flags a non-secret shape (e.g. a Figma `fileKey=`) — `_gitleaks_clean` now scans with a bundled allowlist config instead of gitleaks' bare defaults; the Health tab's scheduled-job status decodes launchd's raw wait status instead of printing it (a script exiting 1 no longer reads as "status 256") |
 
 ---
 

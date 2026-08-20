@@ -43,6 +43,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h4>1.2.2</h4>
+        <ul>
+            <li>Team sync no longer stays blocked when the secret scanner flags something
+                that isn't actually a secret (like a Figma file key)</li>
+            <li>The Health tab's scheduled-job status now shows the real exit code instead
+                of a raw, confusing number</li>
+        </ul>
         <h4>1.2.1</h4>
         <ul>
             <li>Team sync no longer sticks at 'pull' with "Cannot rebase onto multiple branches"</li>

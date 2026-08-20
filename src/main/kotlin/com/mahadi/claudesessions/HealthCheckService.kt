@@ -223,12 +223,23 @@ object HealthCheckService {
             if (process.exitValue() != 0) {
                 null
             } else {
-                LAST_EXIT_STATUS.find(output)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                LAST_EXIT_STATUS.find(output)?.groupValues?.get(1)?.toIntOrNull()?.let(::decodeWaitStatus) ?: 0
             }
         }
     } catch (throwable: Throwable) {
         LOG.warn("launchctl list $label failed", throwable)
         null
+    }
+
+    /**
+     * LastExitStatus is the raw wait(2) status, not a plain exit code — a script exiting 1
+     * is reported as 256 (1 shl 8), which read as-is looks like an unrelated crash. Decode it
+     * the standard POSIX way: a nonzero low byte is the terminating signal, otherwise the
+     * next byte up is the real exit code.
+     */
+    private fun decodeWaitStatus(rawStatus: Int): Int {
+        val signal = rawStatus and 0x7F
+        return if (signal != 0) signal else (rawStatus shr 8) and 0xFF
     }
 
     private fun cacheFile(name: String): File =
